@@ -31,12 +31,18 @@ use pocketmine\block\utils\AnalogRedstoneSignalEmitter;
 use pocketmine\block\utils\HorizontalFacing;
 use pocketmine\block\utils\PoweredByRedstone;
 use pocketmine\math\Facing;
-use pocketmine\math\Vector3;
 use pocketmine\world\World;
 
 final class SignalPropagator {
 
-    public static function calculatePowerAt(RedstoneEngine $engine, World $world, Block $block, Vector3 $pos): int {
+    public static function calculatePowerAt(
+        RedstoneEngine $engine,
+        World $world,
+        Block $block,
+        int $x,
+        int $y,
+        int $z
+    ): int {
         $sourceStrength = self::getSourceStrength($block);
         if ($sourceStrength >= 0) {
             return $sourceStrength;
@@ -46,17 +52,16 @@ final class SignalPropagator {
 
         foreach (Facing::ALL as $face) {
             [$dx, $dy, $dz] = Facing::OFFSET[$face];
-            $nx = (int) $pos->x + $dx;
-            $ny = (int) $pos->y + $dy;
-            $nz = (int) $pos->z + $dz;
+            $nx = $x + $dx;
+            $ny = $y + $dy;
+            $nz = $z + $dz;
 
             if (!$world->isChunkLoaded($nx >> 4, $nz >> 4)) {
                 continue;
             }
 
             $neighbor = $world->getBlockAt($nx, $ny, $nz);
-            $oppFace  = Facing::opposite($face);
-            $power    = self::getOutputToward($engine, $world, $neighbor, $oppFace, new Vector3($nx, $ny, $nz));
+            $power    = self::getOutputToward($engine, $world, $neighbor, Facing::opposite($face), $nx, $ny, $nz);
 
             if ($power > $max) {
                 $max = $power;
@@ -95,7 +100,9 @@ final class SignalPropagator {
         World $world,
         Block $neighbor,
         int $towardFace,
-        Vector3 $neighborPos
+        int $nx,
+        int $ny,
+        int $nz
     ): int {
         if ($neighbor instanceof Lever) {
             return $neighbor->isActivated() ? 15 : 0;
@@ -114,7 +121,7 @@ final class SignalPropagator {
         }
 
         if ($neighbor instanceof RedstoneWire && $neighbor instanceof AnalogRedstoneSignalEmitter) {
-            $stored = $engine->getStoredPower($world, (int) $neighborPos->x, (int) $neighborPos->y, (int) $neighborPos->z);
+            $stored = $engine->getStoredPower($world, $nx, $ny, $nz);
             return max(0, $stored - 1);
         }
 
