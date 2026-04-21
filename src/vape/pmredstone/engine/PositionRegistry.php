@@ -20,7 +20,8 @@ namespace vape\pmredstone\engine;
 
 use pocketmine\world\Position;
 
-final class PositionRegistry {
+final class PositionRegistry
+{
 
     /** @var array<int, array<string, array{int, int, int}>> worldId => key => [x, y, z] */
     private array $sensors = [];
@@ -28,13 +29,18 @@ final class PositionRegistry {
     /** @var array<int, array<string, array{int, int, int}>> worldId => key => [x, y, z] */
     private array $plates = [];
 
-    public function registerSensor(Position $pos): void {
+    /** @var array<int, array<string, array{int, int, int}>> worldId => key => [x, y, z] */
+    private array $buttons = [];
+
+    public function registerSensor(Position $pos): void
+    {
         $wid = $pos->getWorld()->getId();
         $key = $this->key((int) $pos->x, (int) $pos->y, (int) $pos->z);
         $this->sensors[$wid][$key] = [(int) $pos->x, (int) $pos->y, (int) $pos->z];
     }
 
-    public function unregisterSensor(Position $pos): void {
+    public function unregisterSensor(Position $pos): void
+    {
         $wid = $pos->getWorld()->getId();
         $key = $this->key((int) $pos->x, (int) $pos->y, (int) $pos->z);
         unset($this->sensors[$wid][$key]);
@@ -43,13 +49,15 @@ final class PositionRegistry {
         }
     }
 
-    public function registerPlate(Position $pos): void {
+    public function registerPlate(Position $pos): void
+    {
         $wid = $pos->getWorld()->getId();
         $key = $this->key((int) $pos->x, (int) $pos->y, (int) $pos->z);
         $this->plates[$wid][$key] = [(int) $pos->x, (int) $pos->y, (int) $pos->z];
     }
 
-    public function unregisterPlate(Position $pos): void {
+    public function unregisterPlate(Position $pos): void
+    {
         $wid = $pos->getWorld()->getId();
         $key = $this->key((int) $pos->x, (int) $pos->y, (int) $pos->z);
         unset($this->plates[$wid][$key]);
@@ -58,21 +66,48 @@ final class PositionRegistry {
         }
     }
 
+    public function registerButton(Position $pos): void
+    {
+        $wid = $pos->getWorld()->getId();
+        $key = $this->key((int) $pos->x, (int) $pos->y, (int) $pos->z);
+        $this->buttons[$wid][$key] = [(int) $pos->x, (int) $pos->y, (int) $pos->z];
+    }
+
+    public function unregisterButton(Position $pos): void
+    {
+        $wid = $pos->getWorld()->getId();
+        $key = $this->key((int) $pos->x, (int) $pos->y, (int) $pos->z);
+        unset($this->buttons[$wid][$key]);
+        if (isset($this->buttons[$wid]) && count($this->buttons[$wid]) === 0) {
+            unset($this->buttons[$wid]);
+        }
+    }
+
     /** @return array<string, array{int, int, int}> */
-    public function getSensorsForWorld(int $worldId): array {
+    public function getSensorsForWorld(int $worldId): array
+    {
         return $this->sensors[$worldId] ?? [];
     }
 
     /** @return array<string, array{int, int, int}> */
-    public function getPlatesForWorld(int $worldId): array {
+    public function getPlatesForWorld(int $worldId): array
+    {
         return $this->plates[$worldId] ?? [];
     }
 
-    public function invalidateWorld(int $worldId): void {
-        unset($this->sensors[$worldId], $this->plates[$worldId]);
+    /** @return array<string, array{int, int, int}> */
+    public function getButtonsForWorld(int $worldId): array
+    {
+        return $this->buttons[$worldId] ?? [];
     }
 
-    public function getSensorCount(): int {
+    public function invalidateWorld(int $worldId): void
+    {
+        unset($this->sensors[$worldId], $this->plates[$worldId], $this->buttons[$worldId]);
+    }
+
+    public function getSensorCount(): int
+    {
         $total = 0;
         foreach ($this->sensors as $set) {
             $total += count($set);
@@ -80,7 +115,8 @@ final class PositionRegistry {
         return $total;
     }
 
-    public function getPlateCount(): int {
+    public function getPlateCount(): int
+    {
         $total = 0;
         foreach ($this->plates as $set) {
             $total += count($set);
@@ -88,7 +124,17 @@ final class PositionRegistry {
         return $total;
     }
 
-    private function key(int $x, int $y, int $z): string {
+    public function getButtonCount(): int
+    {
+        $total = 0;
+        foreach ($this->buttons as $set) {
+            $total += count($set);
+        }
+        return $total;
+    }
+
+    private function key(int $x, int $y, int $z): string
+    {
         return "$x:$y:$z";
     }
 }

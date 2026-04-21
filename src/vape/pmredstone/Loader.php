@@ -22,22 +22,26 @@ use pocketmine\plugin\PluginBase;
 use vape\pmredstone\config\RedstoneConfig;
 use vape\pmredstone\engine\RedstoneEngine;
 use vape\pmredstone\listener\RedstoneListener;
+use vape\pmredstone\scheduler\ButtonSyncTask;
 use vape\pmredstone\scheduler\DaylightSensorTask;
 use vape\pmredstone\scheduler\PressurePlateTask;
 use vape\pmredstone\scheduler\RedstoneTickTask;
 
-final class Loader extends PluginBase {
+final class Loader extends PluginBase
+{
 
     private static self $instance;
 
     private RedstoneConfig $redstoneConfig;
     private RedstoneEngine $engine;
 
-    public static function getInstance(): self {
+    public static function getInstance(): self
+    {
         return self::$instance;
     }
 
-    public function onEnable(): void {
+    public function onEnable(): void
+    {
         self::$instance = $this;
 
         $this->saveDefaultConfig();
@@ -67,6 +71,11 @@ final class Loader extends PluginBase {
             );
         }
 
+        $this->getScheduler()->scheduleRepeatingTask(
+            new ButtonSyncTask($this->engine, $this->redstoneConfig),
+            1
+        );
+
         $cfg = $this->redstoneConfig;
         $this->getLogger()->info("PMRedstone" . $this->getDescription()->getVersion() . " enabled.");
         $this->getLogger()->info(sprintf(
@@ -81,15 +90,18 @@ final class Loader extends PluginBase {
         }
     }
 
-    public function onDisable(): void {
+    public function onDisable(): void
+    {
         $this->engine->shutdown();
     }
 
-    public function getEngine(): RedstoneEngine {
+    public function getEngine(): RedstoneEngine
+    {
         return $this->engine;
     }
 
-    public function getRedstoneConfig(): RedstoneConfig {
+    public function getRedstoneConfig(): RedstoneConfig
+    {
         return $this->redstoneConfig;
     }
 }

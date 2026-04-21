@@ -62,9 +62,9 @@ final class RedstoneConfig {
 
     public function __construct(Config $config) {
         $this->enabled             = (bool)  $config->getNested("redstone.enabled", true);
-        $this->tickRate            = max(1,   (int) $config->getNested("redstone.tick-rate", 2));
-        $this->maxUpdateBudget     = max(16,  (int) $config->getNested("redstone.max-update-budget", 256));
-        $this->maxQueueSize        = max(64,  (int) $config->getNested("redstone.max-update-queue", 8192));
+        $this->tickRate            = max(1,   (int) $config->getNested("redstone.tick-rate", 1));
+        $this->maxUpdateBudget     = max(16,  (int) $config->getNested("redstone.max-update-budget", 2048));
+        $this->maxQueueSize        = max(64,  (int) $config->getNested("redstone.max-update-queue", 50000));
         $this->disabledWorlds      = (array)  $config->getNested("redstone.disabled-worlds", []);
 
         $this->pistonsEnabled           = (bool) $config->getNested("pistons.enabled", true);

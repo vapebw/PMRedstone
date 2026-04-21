@@ -22,6 +22,8 @@ use pocketmine\block\Block;
 use pocketmine\block\Button;
 use pocketmine\block\DaylightSensor;
 use pocketmine\block\Lever;
+use pocketmine\block\Opaque;
+use pocketmine\block\Redstone;
 use pocketmine\block\RedstoneComparator;
 use pocketmine\block\RedstoneRepeater;
 use pocketmine\block\RedstoneTorch;
@@ -33,7 +35,8 @@ use pocketmine\block\utils\PoweredByRedstone;
 use pocketmine\math\Facing;
 use pocketmine\world\World;
 
-final class SignalPropagator {
+final class SignalPropagator
+{
 
     public static function calculatePowerAt(
         RedstoneEngine $engine,
@@ -43,12 +46,52 @@ final class SignalPropagator {
         int $y,
         int $z
     ): int {
-        $sourceStrength = self::getSourceStrength($block);
+        if ($block instanceof RedstoneWire) {
+            return self::calculateWirePowerAt($engine, $world, $x, $y, $z);
+        }
+
+        $sourceStrength = self::getSourceStrength($engine, $world, $block, $x, $y, $z);
         if ($sourceStrength >= 0) {
             return $sourceStrength;
         }
 
         $max = 0;
+        $facesToCheck = Facing::ALL;
+
+        if ($block instanceof RedstoneRepeater || $block instanceof RedstoneComparator) {
+            $facesToCheck = [Facing::opposite($block->getFacing())];
+        }
+
+        foreach ($facesToCheck as $face) {
+            [$dx, $dy, $dz] = Facing::OFFSET[$face];
+            $nx = $x + $dx;
+            $ny = $y + $dy;
+            $nz = $z + $dz;
+
+            if (!$world->isChunkLoaded($nx >> 4, $nz >> 4)) {
+                continue;
+            }
+
+            $neighbor = $world->getBlockAt($nx, $ny, $nz);
+            $power = self::getOutputToward($engine, $world, $neighbor, Facing::opposite($face), $nx, $ny, $nz, $block);
+
+            if ($power > $max) {
+                $max = $power;
+            }
+        }
+
+        return $max;
+    }
+
+    private static function calculateWirePowerAt(
+        RedstoneEngine $engine,
+        World $world,
+        int $x,
+        int $y,
+        int $z
+    ): int {
+        $max = 0;
+        $wire = $world->getBlockAt($x, $y, $z);
 
         foreach (Facing::ALL as $face) {
             [$dx, $dy, $dz] = Facing::OFFSET[$face];
@@ -61,7 +104,11 @@ final class SignalPropagator {
             }
 
             $neighbor = $world->getBlockAt($nx, $ny, $nz);
-            $power    = self::getOutputToward($engine, $world, $neighbor, Facing::opposite($face), $nx, $ny, $nz);
+            $power = self::getOutputToward($engine, $world, $neighbor, Facing::opposite($face), $nx, $ny, $nz, $wire);
+
+            if ($neighbor instanceof RedstoneWire && $neighbor instanceof AnalogRedstoneSignalEmitter) {
+                $power = max(0, $engine->getStoredPower($world, $nx, $ny, $nz) - 1);
+            }
 
             if ($power > $max) {
                 $max = $power;
@@ -71,7 +118,8 @@ final class SignalPropagator {
         return $max;
     }
 
-    public static function getSourceStrength(Block $block): int {
+    public static function getSourceStrength(RedstoneEngine $engine, World $world, Block $block, int $x, int $y, int $z): int
+    {
         if ($block instanceof Lever) {
             return $block->isActivated() ? 15 : 0;
         }
@@ -85,11 +133,26 @@ final class SignalPropagator {
         }
 
         if ($block instanceof RedstoneTorch) {
+            $attachedPos = null;
+            if ($block instanceof HorizontalFacing) {
+                $facing = $block->getFacing();
+                $attachedPos = $block->getPosition()->getSide(Facing::opposite($facing));
+            } else {
+                $attachedPos = $block->getPosition()->getSide(Facing::DOWN);
+            }
+
+            if ($engine->getStoredPower($world, $attachedPos->getFloorX(), $attachedPos->getFloorY(), $attachedPos->getFloorZ()) > 0) {
+                return 0;
+            }
+            return 15;
+        }
+
+        if ($block instanceof Redstone) {
             return 15;
         }
 
         if ($block instanceof DaylightSensor && $block instanceof AnalogRedstoneSignalEmitter) {
-            return $block->getSignalStrength();
+            return $block->getOutputSignalStrength();
         }
 
         return -1;
@@ -102,7 +165,8 @@ final class SignalPropagator {
         int $towardFace,
         int $nx,
         int $ny,
-        int $nz
+        int $nz,
+        Block $requestingBlock
     ): int {
         if ($neighbor instanceof Lever) {
             return $neighbor->isActivated() ? 15 : 0;
@@ -120,12 +184,20 @@ final class SignalPropagator {
             return $towardFace !== Facing::DOWN ? 15 : 0;
         }
 
-        if ($neighbor instanceof RedstoneWire && $neighbor instanceof AnalogRedstoneSignalEmitter) {
+        if ($neighbor instanceof RedstoneWire) {
+            return 0;
+        }
+
+        if ($neighbor instanceof Opaque) {
             $stored = $engine->getStoredPower($world, $nx, $ny, $nz);
+            if ($requestingBlock instanceof RedstoneWire) {
+                return 0;
+            }
             return max(0, $stored - 1);
         }
 
-        if ($neighbor instanceof RedstoneRepeater
+        if (
+            $neighbor instanceof RedstoneRepeater
             && $neighbor instanceof PoweredByRedstone
             && $neighbor instanceof HorizontalFacing
         ) {
@@ -135,7 +207,8 @@ final class SignalPropagator {
             return $towardFace === $neighbor->getFacing() ? 15 : 0;
         }
 
-        if ($neighbor instanceof RedstoneComparator
+        if (
+            $neighbor instanceof RedstoneComparator
             && $neighbor instanceof PoweredByRedstone
             && $neighbor instanceof HorizontalFacing
             && $neighbor instanceof AnalogRedstoneSignalEmitter
@@ -143,21 +216,27 @@ final class SignalPropagator {
             if (!$neighbor->isPowered()) {
                 return 0;
             }
-            return $towardFace === $neighbor->getFacing() ? $neighbor->getSignalStrength() : 0;
+            return $towardFace === $neighbor->getFacing() ? $neighbor->getOutputSignalStrength() : 0;
+        }
+
+        if ($neighbor instanceof Redstone) {
+            return 15;
         }
 
         if ($neighbor instanceof DaylightSensor && $neighbor instanceof AnalogRedstoneSignalEmitter) {
-            return $neighbor->getSignalStrength();
+            return $neighbor->getOutputSignalStrength();
         }
 
         return 0;
     }
 
-    public static function isSource(Block $block): bool {
+    public static function isSource(Block $block): bool
+    {
         return $block instanceof Lever
             || $block instanceof Button
             || $block instanceof SimplePressurePlate
             || $block instanceof RedstoneTorch
+            || $block instanceof Redstone
             || $block instanceof DaylightSensor;
     }
 }

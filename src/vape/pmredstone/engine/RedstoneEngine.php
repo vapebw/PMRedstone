@@ -23,6 +23,7 @@ use pocketmine\block\RedstoneLamp;
 use pocketmine\block\RedstoneOre;
 use pocketmine\block\RedstoneComparator;
 use pocketmine\block\RedstoneRepeater;
+use pocketmine\block\RedstoneTorch;
 use pocketmine\block\RedstoneWire;
 use pocketmine\block\utils\AnalogRedstoneSignalEmitter;
 use pocketmine\block\utils\PoweredByRedstone;
@@ -34,12 +35,10 @@ use pocketmine\world\World;
 use SplQueue;
 use vape\pmredstone\config\RedstoneConfig;
 
-final class RedstoneEngine {
+final class RedstoneEngine
+{
 
     /**
-     * Sparse power map, only entries with power over 0 are stored
-     * Unset when power drops to 0 to prevent unbounded growth
-     *
      * @var array<int, array<string, int>> worldId => posKey => powerLevel (1-15)
      */
     private array $powerMap = [];
@@ -50,6 +49,9 @@ final class RedstoneEngine {
     /** @var array<int, SplQueue> worldId => queue of packed "x:y:z" strings */
     private array $dirtyQueue = [];
 
+    /** @var array<int, SplQueue> worldId => queue of updates for the next tick */
+    private array $delayedQueue = [];
+
     private PistonEngine $pistonEngine;
     private PositionRegistry $registry;
 
@@ -58,35 +60,40 @@ final class RedstoneEngine {
         private readonly RedstoneConfig $cfg
     ) {
         $this->pistonEngine = new PistonEngine($this, $cfg);
-        $this->registry     = new PositionRegistry();
+        $this->registry = new PositionRegistry();
     }
 
-    public function getPlugin(): Plugin {
+    public function getPlugin(): Plugin
+    {
         return $this->plugin;
     }
 
-    public function getConfig(): RedstoneConfig {
+    public function getConfig(): RedstoneConfig
+    {
         return $this->cfg;
     }
 
-    public function getPistonEngine(): PistonEngine {
+    public function getPistonEngine(): PistonEngine
+    {
         return $this->pistonEngine;
     }
 
-    public function getRegistry(): PositionRegistry {
+    public function getRegistry(): PositionRegistry
+    {
         return $this->registry;
     }
 
-    public function notifyChange(Position $pos): void {
+    public function notifyChange(Position $pos): void
+    {
         $world = $pos->getWorld();
         if ($this->cfg->isWorldDisabled($world->getFolderName())) {
             return;
         }
 
         $wid = $world->getId();
-        $x   = (int) $pos->x;
-        $y   = (int) $pos->y;
-        $z   = (int) $pos->z;
+        $x = (int) $pos->x;
+        $y = (int) $pos->y;
+        $z = (int) $pos->z;
 
         $this->enqueue($wid, $x, $y, $z);
 
@@ -96,92 +103,113 @@ final class RedstoneEngine {
         }
     }
 
-    private function enqueue(int $wid, int $x, int $y, int $z): void {
+    private function enqueue(int $wid, int $x, int $y, int $z, bool $delayed = false): void
+    {
         $key = "$x:$y:$z";
 
         if (isset($this->dirtySet[$wid][$key])) {
             return;
         }
 
-        if (!isset($this->dirtyQueue[$wid])) {
-            $this->dirtyQueue[$wid] = new SplQueue();
+        $targetQueue = $delayed ? "delayedQueue" : "dirtyQueue";
+
+        if (!isset($this->{$targetQueue}[$wid])) {
+            $this->{$targetQueue}[$wid] = new SplQueue();
         }
 
-        if ($this->dirtyQueue[$wid]->count() >= $this->cfg->getMaxQueueSize()) {
+        if ($this->{$targetQueue}[$wid]->count() >= $this->cfg->getMaxQueueSize()) {
             return;
         }
 
         $this->dirtySet[$wid][$key] = true;
-        $this->dirtyQueue[$wid]->enqueue($key);
+        $this->{$targetQueue}[$wid]->enqueue($key);
     }
 
-    public function tick(): void {
-        $wm     = $this->plugin->getServer()->getWorldManager();
-        $budget = $this->cfg->getMaxUpdateBudget();
+    public function tick(): void
+    {
+        $wm = $this->plugin->getServer()->getWorldManager();
+        $budget = $this->cfg->getMaxUpdateBudget() * 2;
 
-        foreach ($this->dirtyQueue as $wid => $queue) {
-            if ($budget <= 0) {
-                break;
-            }
-
-            $world = $wm->getWorld($wid);
-
-            if ($world === null) {
-                $this->invalidateWorld($wid);
-                continue;
-            }
-
-            while (!$queue->isEmpty() && $budget-- > 0) {
-                $key  = $queue->dequeue();
+        foreach ($this->delayedQueue as $wid => $queue) {
+            while (!$queue->isEmpty()) {
+                $key = $queue->dequeue();
                 unset($this->dirtySet[$wid][$key]);
-
                 [$x, $y, $z] = $this->decodeKey($key);
+                $this->enqueue($wid, $x, $y, $z);
+            }
+        }
 
-                if (!$world->isChunkLoaded($x >> 4, $z >> 4)) {
+        $worlds = array_keys($this->dirtyQueue);
+        if (count($worlds) > 0) {
+            $worldBudget = (int) ($budget / count($worlds));
+            foreach ($this->dirtyQueue as $wid => $queue) {
+                $world = $wm->getWorld($wid);
+                if ($world === null) {
+                    $this->invalidateWorld($wid);
                     continue;
                 }
 
-                $block     = $world->getBlockAt($x, $y, $z);
-                $newPower  = SignalPropagator::calculatePowerAt($this, $world, $block, $x, $y, $z);
-                $prevPower = $this->powerMap[$wid][$key] ?? 0;
+                $processed = 0;
+                while (!$queue->isEmpty() && $processed < $worldBudget && $budget > 0) {
+                    $processed++;
+                    $budget--;
+                    $key = $queue->dequeue();
+                    unset($this->dirtySet[$wid][$key]);
 
-                if ($newPower === $prevPower) {
-                    continue;
-                }
+                    [$x, $y, $z] = $this->decodeKey($key);
 
-                if ($newPower === 0) {
-                    unset($this->powerMap[$wid][$key]);
-                    if (isset($this->powerMap[$wid]) && count($this->powerMap[$wid]) === 0) {
-                        unset($this->powerMap[$wid]);
+                    if (!$world->isChunkLoaded($x >> 4, $z >> 4)) {
+                        continue;
                     }
-                } else {
-                    $this->powerMap[$wid][$key] = $newPower;
-                }
 
-                if ($this->cfg->isDebugPowerChanges()) {
-                    $this->plugin->getLogger()->debug(sprintf(
-                        "[PowerChange] %s @ %d,%d,%d : %d -> %d",
-                        $block->getName(), $x, $y, $z, $prevPower, $newPower
-                    ));
-                }
+                    $block = $world->getBlockAt($x, $y, $z);
+                    $newPower = SignalPropagator::calculatePowerAt($this, $world, $block, $x, $y, $z);
+                    $prevPower = $this->powerMap[$wid][$key] ?? 0;
 
-                $pos = new Position($x, $y, $z, $world);
-                $this->applyPowerToBlock($world, $block, $pos, $prevPower, $newPower);
+                    if ($newPower === $prevPower) {
+                        continue;
+                    }
 
-                foreach (Facing::ALL as $face) {
-                    [$dx, $dy, $dz] = Facing::OFFSET[$face];
-                    $this->enqueue($wid, $x + $dx, $y + $dy, $z + $dz);
+                    if ($newPower === 0) {
+                        unset($this->powerMap[$wid][$key]);
+                        if (isset($this->powerMap[$wid]) && count($this->powerMap[$wid]) === 0) {
+                            unset($this->powerMap[$wid]);
+                        }
+                    } else {
+                        $this->powerMap[$wid][$key] = $newPower;
+                    }
+
+                    if ($this->cfg->isDebugPowerChanges()) {
+                        $this->plugin->getLogger()->debug(sprintf(
+                            "[PowerChange] %s @ %d,%d,%d : %d -> %d",
+                            $block->getName(),
+                            $x,
+                            $y,
+                            $z,
+                            $prevPower,
+                            $newPower
+                        ));
+                    }
+
+                    $pos = new Position($x, $y, $z, $world);
+                    $this->applyPowerToBlock($world, $block, $pos, $prevPower, $newPower);
+
+                    foreach (Facing::ALL as $face) {
+                        [$dx, $dy, $dz] = Facing::OFFSET[$face];
+                        $this->enqueue($wid, $x + $dx, $y + $dy, $z + $dz);
+                    }
                 }
             }
         }
     }
 
-    private function applyPowerToBlock(World $world, Block $block, Position $pos, int $prev, int $now): void {
+    private function applyPowerToBlock(World $world, Block $block, Position $pos, int $prev, int $now): void
+    {
         $wasPowered = $prev > 0;
-        $isPowered  = $now > 0;
+        $isPowered = $now > 0;
 
         if ($block instanceof RedstoneWire && $block instanceof AnalogRedstoneSignalEmitter) {
-            $block->setSignalStrength($now);
+            $block->setOutputSignalStrength($now);
             $world->setBlock($pos, $block);
             return;
         }
@@ -198,18 +226,15 @@ final class RedstoneEngine {
             return;
         }
 
-        if ($block instanceof RedstoneRepeater && $block instanceof PoweredByRedstone) {
+        if ($block instanceof RedstoneRepeater || $block instanceof RedstoneComparator || $block instanceof RedstoneTorch) {
             if ($wasPowered !== $isPowered) {
-                $block->setPowered($isPowered);
+                if ($block instanceof PoweredByRedstone)
+                    $block->setPowered($isPowered);
                 $world->setBlock($pos, $block);
-            }
-            return;
-        }
-
-        if ($block instanceof RedstoneComparator && $block instanceof PoweredByRedstone) {
-            if ($wasPowered !== $isPowered) {
-                $block->setPowered($isPowered);
-                $world->setBlock($pos, $block);
+                foreach (Facing::ALL as $face) {
+                    $side = $pos->getSide($face);
+                    $this->enqueue($world->getId(), $side->getFloorX(), $side->getFloorY(), $side->getFloorZ(), true);
+                }
             }
             return;
         }
@@ -219,11 +244,24 @@ final class RedstoneEngine {
         }
     }
 
-    public function getStoredPower(World $world, int $x, int $y, int $z): int {
-        return $this->powerMap[$world->getId()]["$x:$y:$z"] ?? 0;
+    public function getStoredPower(World $world, int $x, int $y, int $z): int
+    {
+        $wid = $world->getId();
+        $key = "$x:$y:$z";
+        if (isset($this->powerMap[$wid][$key])) {
+            return $this->powerMap[$wid][$key];
+        }
+
+        $block = $world->getBlockAt($x, $y, $z);
+        if ($block instanceof RedstoneWire && $block instanceof AnalogRedstoneSignalEmitter) {
+            return $block->getOutputSignalStrength();
+        }
+
+        return 0;
     }
 
-    public function getPowerMapSize(): int {
+    public function getPowerMapSize(): int
+    {
         $total = 0;
         foreach ($this->powerMap as $map) {
             $total += count($map);
@@ -231,7 +269,8 @@ final class RedstoneEngine {
         return $total;
     }
 
-    public function getDirtyQueueSize(): int {
+    public function getDirtyQueueSize(): int
+    {
         $total = 0;
         foreach ($this->dirtyQueue as $queue) {
             $total += $queue->count();
@@ -239,7 +278,8 @@ final class RedstoneEngine {
         return $total;
     }
 
-    public function invalidateWorld(int $wid): void {
+    public function invalidateWorld(int $wid): void
+    {
         unset(
             $this->powerMap[$wid],
             $this->dirtySet[$wid],
@@ -248,14 +288,16 @@ final class RedstoneEngine {
         $this->registry->invalidateWorld($wid);
     }
 
-    public function shutdown(): void {
-        $this->powerMap   = [];
-        $this->dirtySet   = [];
+    public function shutdown(): void
+    {
+        $this->powerMap = [];
+        $this->dirtySet = [];
         $this->dirtyQueue = [];
     }
 
     /** @return array{int, int, int} */
-    private function decodeKey(string $key): array {
+    private function decodeKey(string $key): array
+    {
         $parts = explode(":", $key);
         return [(int) $parts[0], (int) $parts[1], (int) $parts[2]];
     }
