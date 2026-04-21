@@ -20,7 +20,6 @@ namespace vape\pmredstone\scheduler;
 
 use pocketmine\block\SimplePressurePlate;
 use pocketmine\math\AxisAlignedBB;
-use pocketmine\math\Vector3;
 use pocketmine\scheduler\Task;
 use pocketmine\world\World;
 use vape\pmredstone\config\RedstoneConfig;
@@ -34,53 +33,52 @@ final class PressurePlateTask extends Task {
     ) {}
 
     public function onRun(): void {
-        $wm = $this->engine->getPlugin()->getServer()->getWorldManager();
+        $wm       = $this->engine->getPlugin()->getServer()->getWorldManager();
+        $registry = $this->engine->getRegistry();
 
         foreach ($wm->getWorlds() as $world) {
             if ($this->cfg->isWorldDisabled($world->getFolderName())) {
                 continue;
             }
-            $this->checkPlatesInWorld($world);
+
+            $plates = $registry->getPlatesForWorld($world->getId());
+
+            if (count($plates) === 0) {
+                continue;
+            }
+
+            $this->checkPlates($world, $plates);
         }
     }
 
-    private function checkPlatesInWorld(World $world): void {
-        foreach ($world->getLoadedChunks() as $chunkHash => $chunk) {
-            World::getXZ($chunkHash, $chunkX, $chunkZ);
-            $baseX = $chunkX << 4;
-            $baseZ = $chunkZ << 4;
-
-            for ($x = 0; $x < 16; $x++) {
-                for ($z = 0; $z < 16; $z++) {
-                    $bx = $baseX + $x;
-                    $bz = $baseZ + $z;
-
-                    for ($y = $world->getMinY(); $y <= $world->getMaxY(); $y++) {
-                        $block = $world->getBlockAt($bx, $y, $bz);
-
-                        if (!($block instanceof SimplePressurePlate)) {
-                            continue;
-                        }
-
-                        $aabb = new AxisAlignedBB(
-                            $bx,        $y,        $bz,
-                            $bx + 1.0,  $y + 0.5,  $bz + 1.0
-                        );
-
-                        $entitiesAbove   = $world->getNearbyEntities($aabb);
-                        $shouldBePressed = count($entitiesAbove) > 0;
-                        $isPressed       = $block->isPressed();
-
-                        if ($shouldBePressed === $isPressed) {
-                            continue;
-                        }
-
-                        $block->setPressed($shouldBePressed);
-                        $world->setBlock($block->getPosition(), $block);
-                        $this->engine->notifyChange($block->getPosition());
-                    }
-                }
+    /** @param array<string, array{int, int, int}> $plates */
+    private function checkPlates(World $world, array $plates): void {
+        foreach ($plates as [$x, $y, $z]) {
+            if (!$world->isChunkLoaded($x >> 4, $z >> 4)) {
+                continue;
             }
+
+            $block = $world->getBlockAt($x, $y, $z);
+
+            if (!($block instanceof SimplePressurePlate)) {
+                continue;
+            }
+
+            $aabb = new AxisAlignedBB(
+                $x,       $y,       $z,
+                $x + 1.0, $y + 0.5, $z + 1.0
+            );
+
+            $shouldBePressed = count($world->getNearbyEntities($aabb)) > 0;
+            $isPressed       = $block->isPressed();
+
+            if ($shouldBePressed === $isPressed) {
+                continue;
+            }
+
+            $block->setPressed($shouldBePressed);
+            $world->setBlock($block->getPosition(), $block);
+            $this->engine->notifyChange($block->getPosition());
         }
     }
 }
