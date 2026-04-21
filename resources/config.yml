@@ -1,0 +1,48 @@
+redstone:
+  enabled: true
+  tick-rate: 2
+  max-update-budget: 256
+  max-update-queue: 8192
+  disabled-worlds:
+    - example_world
+
+pistons:
+  enabled: true
+  max-push-distance: 12
+  push-delay-ticks: 2
+  retract-delay-ticks: 2
+  sticky-retract-on-power-loss: true
+  disabled-worlds: []
+
+dispenser:
+  enabled: true
+  fire-delay-ticks: 4
+
+dropper:
+  enabled: true
+  drop-delay-ticks: 4
+
+observer:
+  enabled: true
+  pulse-duration-ticks: 2
+
+daylight-sensor:
+  enabled: true
+  update-interval: 20
+
+repeater:
+  enabled: true
+  default-delay-ticks: 2
+
+comparator:
+  enabled: true
+
+pressure-plate:
+  enabled: true
+  entity-check-interval: 4
+
+debug:
+  enabled: false
+  log-propagation: false
+  log-piston-moves: false
+  log-power-changes: false
