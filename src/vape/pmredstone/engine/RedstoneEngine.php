@@ -36,22 +36,29 @@ use vape\pmredstone\config\RedstoneConfig;
 
 final class RedstoneEngine {
 
-    /** @var array<int, array<string, int>> worldId => posKey => powerLevel (0-15) */
+    /**
+     * Sparse power map, only entries with power over 0 are stored
+     * Unset when power drops to 0 to prevent unbounded growth
+     *
+     * @var array<int, array<string, int>> worldId => posKey => powerLevel (1-15)
+     */
     private array $powerMap = [];
 
     /** @var array<int, array<string, true>> worldId => posKey => in-queue flag */
     private array $dirtySet = [];
 
-    /** @var array<int, SplQueue<Vector3>> worldId => dirty position queue */
+    /** @var array<int, SplQueue> worldId => queue of packed "x:y:z" strings */
     private array $dirtyQueue = [];
 
     private PistonEngine $pistonEngine;
+    private PositionRegistry $registry;
 
     public function __construct(
         private readonly Plugin $plugin,
         private readonly RedstoneConfig $cfg
     ) {
         $this->pistonEngine = new PistonEngine($this, $cfg);
+        $this->registry     = new PositionRegistry();
     }
 
     public function getPlugin(): Plugin {
@@ -66,6 +73,10 @@ final class RedstoneEngine {
         return $this->pistonEngine;
     }
 
+    public function getRegistry(): PositionRegistry {
+        return $this->registry;
+    }
+
     public function notifyChange(Position $pos): void {
         $world = $pos->getWorld();
         if ($this->cfg->isWorldDisabled($world->getFolderName())) {
@@ -73,16 +84,20 @@ final class RedstoneEngine {
         }
 
         $wid = $world->getId();
-        $this->enqueue($wid, (int) $pos->x, (int) $pos->y, (int) $pos->z);
+        $x   = (int) $pos->x;
+        $y   = (int) $pos->y;
+        $z   = (int) $pos->z;
+
+        $this->enqueue($wid, $x, $y, $z);
 
         foreach (Facing::ALL as $face) {
             [$dx, $dy, $dz] = Facing::OFFSET[$face];
-            $this->enqueue($wid, (int) $pos->x + $dx, (int) $pos->y + $dy, (int) $pos->z + $dz);
+            $this->enqueue($wid, $x + $dx, $y + $dy, $z + $dz);
         }
     }
 
     private function enqueue(int $wid, int $x, int $y, int $z): void {
-        $key = $this->key($x, $y, $z);
+        $key = "$x:$y:$z";
 
         if (isset($this->dirtySet[$wid][$key])) {
             return;
@@ -90,7 +105,6 @@ final class RedstoneEngine {
 
         if (!isset($this->dirtyQueue[$wid])) {
             $this->dirtyQueue[$wid] = new SplQueue();
-            $this->dirtyQueue[$wid]->setIteratorMode(SplQueue::IT_MODE_DELETE);
         }
 
         if ($this->dirtyQueue[$wid]->count() >= $this->cfg->getMaxQueueSize()) {
@@ -98,13 +112,18 @@ final class RedstoneEngine {
         }
 
         $this->dirtySet[$wid][$key] = true;
-        $this->dirtyQueue[$wid]->enqueue(new Vector3($x, $y, $z));
+        $this->dirtyQueue[$wid]->enqueue($key);
     }
 
     public function tick(): void {
-        $wm = $this->plugin->getServer()->getWorldManager();
+        $wm     = $this->plugin->getServer()->getWorldManager();
+        $budget = $this->cfg->getMaxUpdateBudget();
 
         foreach ($this->dirtyQueue as $wid => $queue) {
+            if ($budget <= 0) {
+                break;
+            }
+
             $world = $wm->getWorld($wid);
 
             if ($world === null) {
@@ -112,39 +131,42 @@ final class RedstoneEngine {
                 continue;
             }
 
-            $budget = $this->cfg->getMaxUpdateBudget();
-
             while (!$queue->isEmpty() && $budget-- > 0) {
-                /** @var Vector3 $vec */
-                $vec = $queue->dequeue();
-                $key = $this->key((int) $vec->x, (int) $vec->y, (int) $vec->z);
+                $key  = $queue->dequeue();
                 unset($this->dirtySet[$wid][$key]);
 
-                if (!$world->isChunkLoaded((int) $vec->x >> 4, (int) $vec->z >> 4)) {
+                [$x, $y, $z] = $this->decodeKey($key);
+
+                if (!$world->isChunkLoaded($x >> 4, $z >> 4)) {
                     continue;
                 }
 
-                $x = (int) $vec->x;
-                $y = (int) $vec->y;
-                $z = (int) $vec->z;
-                $block = $world->getBlockAt($x, $y, $z);
-                $newPower = SignalPropagator::calculatePowerAt($this, $world, $block, $vec);
+                $block     = $world->getBlockAt($x, $y, $z);
+                $newPower  = SignalPropagator::calculatePowerAt($this, $world, $block, $x, $y, $z);
                 $prevPower = $this->powerMap[$wid][$key] ?? 0;
 
                 if ($newPower === $prevPower) {
                     continue;
                 }
 
-                $this->powerMap[$wid][$key] = $newPower;
+                if ($newPower === 0) {
+                    unset($this->powerMap[$wid][$key]);
+                    if (isset($this->powerMap[$wid]) && count($this->powerMap[$wid]) === 0) {
+                        unset($this->powerMap[$wid]);
+                    }
+                } else {
+                    $this->powerMap[$wid][$key] = $newPower;
+                }
 
                 if ($this->cfg->isDebugPowerChanges()) {
                     $this->plugin->getLogger()->debug(sprintf(
-                        "[PowerChange] %s @ %d,%d,%d : %d → %d",
+                        "[PowerChange] %s @ %d,%d,%d : %d -> %d",
                         $block->getName(), $x, $y, $z, $prevPower, $newPower
                     ));
                 }
 
-                $this->applyPowerToBlock($world, $block, new Position($x, $y, $z, $world), $prevPower, $newPower);
+                $pos = new Position($x, $y, $z, $world);
+                $this->applyPowerToBlock($world, $block, $pos, $prevPower, $newPower);
 
                 foreach (Facing::ALL as $face) {
                     [$dx, $dy, $dz] = Facing::OFFSET[$face];
@@ -198,20 +220,43 @@ final class RedstoneEngine {
     }
 
     public function getStoredPower(World $world, int $x, int $y, int $z): int {
-        return $this->powerMap[$world->getId()][$this->key($x, $y, $z)] ?? 0;
+        return $this->powerMap[$world->getId()]["$x:$y:$z"] ?? 0;
+    }
+
+    public function getPowerMapSize(): int {
+        $total = 0;
+        foreach ($this->powerMap as $map) {
+            $total += count($map);
+        }
+        return $total;
+    }
+
+    public function getDirtyQueueSize(): int {
+        $total = 0;
+        foreach ($this->dirtyQueue as $queue) {
+            $total += $queue->count();
+        }
+        return $total;
     }
 
     public function invalidateWorld(int $wid): void {
-        unset($this->powerMap[$wid], $this->dirtySet[$wid], $this->dirtyQueue[$wid]);
+        unset(
+            $this->powerMap[$wid],
+            $this->dirtySet[$wid],
+            $this->dirtyQueue[$wid]
+        );
+        $this->registry->invalidateWorld($wid);
     }
 
     public function shutdown(): void {
-        $this->powerMap  = [];
-        $this->dirtySet  = [];
+        $this->powerMap   = [];
+        $this->dirtySet   = [];
         $this->dirtyQueue = [];
     }
 
-    private function key(int $x, int $y, int $z): string {
-        return "$x:$y:$z";
+    /** @return array{int, int, int} */
+    private function decodeKey(string $key): array {
+        $parts = explode(":", $key);
+        return [(int) $parts[0], (int) $parts[1], (int) $parts[2]];
     }
 }
