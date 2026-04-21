@@ -28,7 +28,6 @@ use pocketmine\block\RedstoneRepeater;
 use pocketmine\block\RedstoneTorch;
 use pocketmine\block\RedstoneWire;
 use pocketmine\block\SimplePressurePlate;
-use pocketmine\block\utils\PoweredByRedstone;
 use pocketmine\event\block\BlockBreakEvent;
 use pocketmine\event\block\BlockPlaceEvent;
 use pocketmine\event\player\PlayerInteractEvent;
@@ -73,22 +72,24 @@ final class RedstoneListener implements Listener {
             return;
         }
 
-        foreach ($event->getTransaction()->getBlocks() as [$x, $y, $z, $block]) {
-            $world = $event->getPlayer()->getWorld();
+        $world = $event->getPlayer()->getWorld();
 
-            if ($this->cfg->isWorldDisabled($world->getFolderName())) {
-                return;
+        if ($this->cfg->isWorldDisabled($world->getFolderName())) {
+            return;
+        }
+
+        foreach ($event->getTransaction()->getBlocks() as [$x, $y, $z, $block]) {
+            if (!$this->isRedstoneRelated($block)) {
+                continue;
             }
 
-            if ($this->isRedstoneRelated($block)) {
-                $pos = new Position($x, $y, $z, $world);
-                $this->engine->notifyChange($pos);
+            $pos = new Position($x, $y, $z, $world);
+            $this->engine->notifyChange($pos);
 
-                if ($this->cfg->isDebugEnabled()) {
-                    $this->engine->getPlugin()->getLogger()->debug(
-                        "[Place] Redstone block placed: " . $block->getName() . " @ $x,$y,$z"
-                    );
-                }
+            if ($block instanceof DaylightSensor) {
+                $this->engine->getRegistry()->registerSensor($pos);
+            } elseif ($block instanceof SimplePressurePlate) {
+                $this->engine->getRegistry()->registerPlate($pos);
             }
         }
     }
@@ -105,8 +106,17 @@ final class RedstoneListener implements Listener {
             return;
         }
 
-        if ($this->isRedstoneRelated($block)) {
-            $this->engine->notifyChange($block->getPosition());
+        if (!$this->isRedstoneRelated($block)) {
+            return;
+        }
+
+        $pos = $block->getPosition();
+        $this->engine->notifyChange($pos);
+
+        if ($block instanceof DaylightSensor) {
+            $this->engine->getRegistry()->unregisterSensor($pos);
+        } elseif ($block instanceof SimplePressurePlate) {
+            $this->engine->getRegistry()->unregisterPlate($pos);
         }
     }
 
