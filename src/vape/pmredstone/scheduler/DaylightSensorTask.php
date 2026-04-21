@@ -27,9 +27,9 @@ use vape\pmredstone\engine\RedstoneEngine;
 
 final class DaylightSensorTask extends Task {
 
-    private const NOON_TIME     = 6000;
-    private const DAY_DURATION  = 24000;
-    private const HALF_DAY      = 12000;
+    private const NOON_TIME    = 6000;
+    private const DAY_DURATION = 24000;
+    private const HALF_DAY     = 12000;
 
     public function __construct(
         private readonly RedstoneEngine $engine,
@@ -37,59 +37,51 @@ final class DaylightSensorTask extends Task {
     ) {}
 
     public function onRun(): void {
-        $wm = $this->engine->getPlugin()->getServer()->getWorldManager();
+        $wm       = $this->engine->getPlugin()->getServer()->getWorldManager();
+        $registry = $this->engine->getRegistry();
 
         foreach ($wm->getWorlds() as $world) {
             if ($this->cfg->isWorldDisabled($world->getFolderName())) {
                 continue;
             }
-            $this->updateSensorsInWorld($world);
+
+            $sensors = $registry->getSensorsForWorld($world->getId());
+
+            if (count($sensors) === 0) {
+                continue;
+            }
+
+            $signal = $this->computeSkySignal($world);
+            $this->updateSensors($world, $sensors, $signal);
         }
     }
 
     private function computeSkySignal(World $world): int {
         $time     = $world->getTime() % self::DAY_DURATION;
         $distance = abs($time - self::NOON_TIME);
-        $signal   = (int) max(0, round(15 - ($distance / self::HALF_DAY) * 15));
-        return min(15, max(0, $signal));
+        return min(15, max(0, (int) round(15 - ($distance / self::HALF_DAY) * 15)));
     }
 
-    private function updateSensorsInWorld(World $world): void {
-        $signal = $this->computeSkySignal($world);
-
-        foreach ($world->getLoadedChunks() as $chunkHash => $chunk) {
-            World::getXZ($chunkHash, $chunkX, $chunkZ);
-            $baseX = $chunkX << 4;
-            $baseZ = $chunkZ << 4;
-
-            for ($x = 0; $x < 16; $x++) {
-                for ($z = 0; $z < 16; $z++) {
-                    $bx = $baseX + $x;
-                    $bz = $baseZ + $z;
-
-                    for ($y = $world->getMinY(); $y <= $world->getMaxY(); $y++) {
-                        $block = $world->getBlockAt($bx, $y, $bz);
-
-                        if (!($block instanceof DaylightSensor)) {
-                            continue;
-                        }
-
-                        if (!($block instanceof AnalogRedstoneSignalEmitter)) {
-                            continue;
-                        }
-
-                        $current = $block->getSignalStrength();
-
-                        if ($current === $signal) {
-                            continue;
-                        }
-
-                        $block->setSignalStrength($signal);
-                        $world->setBlock($block->getPosition(), $block);
-                        $this->engine->notifyChange($block->getPosition());
-                    }
-                }
+    /** @param array<string, array{int, int, int}> $sensors */
+    private function updateSensors(World $world, array $sensors, int $signal): void {
+        foreach ($sensors as [$x, $y, $z]) {
+            if (!$world->isChunkLoaded($x >> 4, $z >> 4)) {
+                continue;
             }
+
+            $block = $world->getBlockAt($x, $y, $z);
+
+            if (!($block instanceof DaylightSensor) || !($block instanceof AnalogRedstoneSignalEmitter)) {
+                continue;
+            }
+
+            if ($block->getSignalStrength() === $signal) {
+                continue;
+            }
+
+            $block->setSignalStrength($signal);
+            $world->setBlock($block->getPosition(), $block);
+            $this->engine->notifyChange($block->getPosition());
         }
     }
 }
