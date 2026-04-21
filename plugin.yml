@@ -1,0 +1,8 @@
+name: PMRedstone
+version: 1.0.0
+main: vape\pmredstone\Loader
+api: ["5.0.0"]
+description: Full Redstone engine for PocketMine-MP 5 — pistons, dispensers, droppers, observers and more.
+author: vapebw
+website: https://github.com/vapebw
+load: STARTUP
