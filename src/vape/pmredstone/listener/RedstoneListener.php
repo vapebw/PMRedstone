@@ -29,6 +29,9 @@ use pocketmine\block\RedstoneOre;
 use pocketmine\block\RedstoneRepeater;
 use pocketmine\block\RedstoneTorch;
 use pocketmine\block\RedstoneWire;
+use pocketmine\block\Door;
+use pocketmine\block\Trapdoor;
+use pocketmine\block\FenceGate;
 use pocketmine\block\SimplePressurePlate;
 use pocketmine\event\block\BlockBreakEvent;
 use pocketmine\event\block\BlockPlaceEvent;
@@ -190,6 +193,9 @@ final class RedstoneListener implements Listener
             || $block instanceof SimplePressurePlate
             || $block instanceof Redstone
             || $block instanceof Opaque
+            || $block instanceof Door
+            || $block instanceof Trapdoor
+            || $block instanceof FenceGate
             || SignalPropagator::isSource($block);
     }
 }

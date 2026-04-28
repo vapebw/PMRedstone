@@ -21,10 +21,13 @@ namespace vape\pmredstone\engine;
 use pocketmine\block\Block;
 use pocketmine\block\RedstoneLamp;
 use pocketmine\block\RedstoneOre;
+use pocketmine\block\Door;
+use pocketmine\block\FenceGate;
 use pocketmine\block\RedstoneComparator;
 use pocketmine\block\RedstoneRepeater;
 use pocketmine\block\RedstoneTorch;
 use pocketmine\block\RedstoneWire;
+use pocketmine\block\Trapdoor;
 use pocketmine\block\utils\AnalogRedstoneSignalEmitter;
 use pocketmine\block\utils\PoweredByRedstone;
 use pocketmine\math\Facing;
@@ -257,6 +260,20 @@ final class RedstoneEngine
                 foreach (Facing::ALL as $face) {
                     $side = $pos->getSide($face);
                     $this->enqueue($world->getId(), $side->getFloorX(), $side->getFloorY(), $side->getFloorZ(), true);
+                }
+            }
+            return;
+        }
+
+        if ($block instanceof Door || $block instanceof Trapdoor || $block instanceof FenceGate) {
+            if ($wasPowered !== $isPowered) {
+                $world->setBlock($pos, $block->setOpen($isPowered));
+                if ($block instanceof Door) {
+                    $other = $pos->getSide($block->isTop() ? Facing::DOWN : Facing::UP);
+                    $otherBlock = $world->getBlock($other);
+                    if ($otherBlock instanceof Door) {
+                        $world->setBlock($other, $otherBlock->setOpen($isPowered));
+                    }
                 }
             }
             return;
