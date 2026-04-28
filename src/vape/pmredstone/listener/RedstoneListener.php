@@ -125,9 +125,6 @@ final class RedstoneListener implements Listener
             {
                 foreach ($this->positions as $pos) {
                     $this->engine->notifyChange($pos);
-                    foreach (Facing::ALL as $face) {
-                        $this->engine->notifyChange($pos->getSide($face));
-                    }
                 }
             }
             },
@@ -168,9 +165,6 @@ final class RedstoneListener implements Listener
             public function onRun(): void
             {
                 $this->engine->notifyChange($this->pos);
-                foreach (Facing::ALL as $face) {
-                    $this->engine->notifyChange($this->pos->getSide($face));
-                }
             }
             },
             1
