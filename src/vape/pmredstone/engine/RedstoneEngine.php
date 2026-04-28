@@ -28,8 +28,8 @@ use pocketmine\block\RedstoneWire;
 use pocketmine\block\utils\AnalogRedstoneSignalEmitter;
 use pocketmine\block\utils\PoweredByRedstone;
 use pocketmine\math\Facing;
-use pocketmine\math\Vector3;
 use pocketmine\plugin\Plugin;
+use pocketmine\scheduler\Task;
 use pocketmine\world\Position;
 use pocketmine\world\World;
 use SplQueue;
@@ -51,6 +51,12 @@ final class RedstoneEngine
 
     /** @var array<int, SplQueue> worldId => queue of updates for the next tick */
     private array $delayedQueue = [];
+
+    /** @var array<int, array<string, int>> */
+    private array $pendingRepeaterUpdates = [];
+
+    /** @var array<int, array<string, int>> */
+    private array $pendingComparatorUpdates = [];
 
     private PistonEngine $pistonEngine;
     private PositionRegistry $registry;
@@ -137,6 +143,9 @@ final class RedstoneEngine
                 [$x, $y, $z] = $this->decodeKey($key);
                 $this->enqueue($wid, $x, $y, $z);
             }
+            if ($queue->isEmpty()) {
+                unset($this->delayedQueue[$wid]);
+            }
         }
 
         $worlds = array_keys($this->dirtyQueue);
@@ -163,6 +172,17 @@ final class RedstoneEngine
                     }
 
                     $block = $world->getBlockAt($x, $y, $z);
+
+                    if ($block instanceof RedstoneRepeater && $this->cfg->isRepeaterEnabled()) {
+                        $this->updateRepeater($world, $block, $x, $y, $z);
+                        continue;
+                    }
+
+                    if ($block instanceof RedstoneComparator && $this->cfg->isComparatorEnabled()) {
+                        $this->updateComparator($world, $block, $x, $y, $z);
+                        continue;
+                    }
+
                     $newPower = SignalPropagator::calculatePowerAt($this, $world, $block, $x, $y, $z);
                     $prevPower = $this->powerMap[$wid][$key] ?? 0;
 
@@ -198,6 +218,10 @@ final class RedstoneEngine
                         [$dx, $dy, $dz] = Facing::OFFSET[$face];
                         $this->enqueue($wid, $x + $dx, $y + $dy, $z + $dz);
                     }
+                }
+
+                if ($queue->isEmpty()) {
+                    unset($this->dirtyQueue[$wid]);
                 }
             }
         }
@@ -244,6 +268,175 @@ final class RedstoneEngine
         }
     }
 
+    private function updateRepeater(World $world, RedstoneRepeater $block, int $x, int $y, int $z): void
+    {
+        $desiredPowered = SignalPropagator::calculateRepeaterInput($this, $world, $block, $x, $y, $z) > 0;
+        $currentPower = $block->isPowered() ? 15 : 0;
+        $targetPower = $desiredPowered ? 15 : 0;
+
+        $wid = $world->getId();
+        $key = "$x:$y:$z";
+
+        if ($currentPower === $targetPower) {
+            $this->syncStoredPower($wid, $key, $targetPower);
+            unset($this->pendingRepeaterUpdates[$wid][$key]);
+            if (isset($this->pendingRepeaterUpdates[$wid]) && count($this->pendingRepeaterUpdates[$wid]) === 0) {
+                unset($this->pendingRepeaterUpdates[$wid]);
+            }
+            return;
+        }
+
+        if (($this->pendingRepeaterUpdates[$wid][$key] ?? null) === $targetPower) {
+            return;
+        }
+
+        $this->pendingRepeaterUpdates[$wid][$key] = $targetPower;
+        $this->plugin->getScheduler()->scheduleDelayedTask(
+            new class($this, new Position($x, $y, $z, $world), $targetPower) extends Task {
+                public function __construct(
+                    private readonly RedstoneEngine $engine,
+                    private readonly Position $pos,
+                    private readonly int $targetPower
+                ) {}
+
+                public function onRun(): void
+                {
+                    $this->engine->applyScheduledRepeaterUpdate($this->pos, $this->targetPower);
+                }
+            },
+            $block->getDelay() * 2
+        );
+    }
+
+    private function updateComparator(World $world, RedstoneComparator $block, int $x, int $y, int $z): void
+    {
+        $targetPower = SignalPropagator::calculateComparatorOutput($this, $world, $block, $x, $y, $z);
+        $currentPower = $block->getOutputSignalStrength();
+
+        $wid = $world->getId();
+        $key = "$x:$y:$z";
+
+        if ($currentPower === $targetPower) {
+            $this->syncStoredPower($wid, $key, $targetPower);
+            unset($this->pendingComparatorUpdates[$wid][$key]);
+            if (isset($this->pendingComparatorUpdates[$wid]) && count($this->pendingComparatorUpdates[$wid]) === 0) {
+                unset($this->pendingComparatorUpdates[$wid]);
+            }
+            return;
+        }
+
+        if (($this->pendingComparatorUpdates[$wid][$key] ?? null) === $targetPower) {
+            return;
+        }
+
+        $this->pendingComparatorUpdates[$wid][$key] = $targetPower;
+        $this->plugin->getScheduler()->scheduleDelayedTask(
+            new class($this, new Position($x, $y, $z, $world), $targetPower) extends Task {
+                public function __construct(
+                    private readonly RedstoneEngine $engine,
+                    private readonly Position $pos,
+                    private readonly int $targetPower
+                ) {}
+
+                public function onRun(): void
+                {
+                    $this->engine->applyScheduledComparatorUpdate($this->pos, $this->targetPower);
+                }
+            },
+            SignalPropagator::getComparatorDelayTicks()
+        );
+    }
+
+    public function applyScheduledRepeaterUpdate(Position $pos, int $targetPower): void
+    {
+        $world = $pos->getWorld();
+        $wid = $world->getId();
+        $key = "{$pos->getFloorX()}:{$pos->getFloorY()}:{$pos->getFloorZ()}";
+
+        if (($this->pendingRepeaterUpdates[$wid][$key] ?? null) !== $targetPower) {
+            return;
+        }
+
+        unset($this->pendingRepeaterUpdates[$wid][$key]);
+        if (isset($this->pendingRepeaterUpdates[$wid]) && count($this->pendingRepeaterUpdates[$wid]) === 0) {
+            unset($this->pendingRepeaterUpdates[$wid]);
+        }
+
+        if (!$world->isChunkLoaded($pos->getFloorX() >> 4, $pos->getFloorZ() >> 4)) {
+            return;
+        }
+
+        $block = $world->getBlock($pos);
+        if (!$block instanceof RedstoneRepeater || !$block instanceof PoweredByRedstone) {
+            return;
+        }
+
+        $desiredPowered = $targetPower > 0;
+        if ($block->isPowered() === $desiredPowered) {
+            $this->syncStoredPower($wid, $key, $targetPower);
+            return;
+        }
+
+        $block->setPowered($desiredPowered);
+        $world->setBlock($pos, $block);
+        $this->syncStoredPower($wid, $key, $targetPower);
+        $this->notifyChange($pos);
+    }
+
+    public function applyScheduledComparatorUpdate(Position $pos, int $targetPower): void
+    {
+        $world = $pos->getWorld();
+        $wid = $world->getId();
+        $key = "{$pos->getFloorX()}:{$pos->getFloorY()}:{$pos->getFloorZ()}";
+
+        if (($this->pendingComparatorUpdates[$wid][$key] ?? null) !== $targetPower) {
+            return;
+        }
+
+        unset($this->pendingComparatorUpdates[$wid][$key]);
+        if (isset($this->pendingComparatorUpdates[$wid]) && count($this->pendingComparatorUpdates[$wid]) === 0) {
+            unset($this->pendingComparatorUpdates[$wid]);
+        }
+
+        if (!$world->isChunkLoaded($pos->getFloorX() >> 4, $pos->getFloorZ() >> 4)) {
+            return;
+        }
+
+        $block = $world->getBlock($pos);
+        if (
+            !$block instanceof RedstoneComparator ||
+            !$block instanceof PoweredByRedstone ||
+            !$block instanceof AnalogRedstoneSignalEmitter
+        ) {
+            return;
+        }
+
+        $desiredPowered = $targetPower > 0;
+        if ($block->isPowered() === $desiredPowered && $block->getOutputSignalStrength() === $targetPower) {
+            $this->syncStoredPower($wid, $key, $targetPower);
+            return;
+        }
+
+        $block->setPowered($desiredPowered);
+        $block->setOutputSignalStrength($targetPower);
+        $world->setBlock($pos, $block);
+        $this->syncStoredPower($wid, $key, $targetPower);
+        $this->notifyChange($pos);
+    }
+
+    private function syncStoredPower(int $wid, string $key, int $power): void
+    {
+        if ($power <= 0) {
+            unset($this->powerMap[$wid][$key]);
+            if (isset($this->powerMap[$wid]) && count($this->powerMap[$wid]) === 0) {
+                unset($this->powerMap[$wid]);
+            }
+            return;
+        }
+
+        $this->powerMap[$wid][$key] = $power;
+    }
+
     public function getStoredPower(World $world, int $x, int $y, int $z): int
     {
         $wid = $world->getId();
@@ -283,7 +476,10 @@ final class RedstoneEngine
         unset(
             $this->powerMap[$wid],
             $this->dirtySet[$wid],
-            $this->dirtyQueue[$wid]
+            $this->dirtyQueue[$wid],
+            $this->delayedQueue[$wid],
+            $this->pendingRepeaterUpdates[$wid],
+            $this->pendingComparatorUpdates[$wid]
         );
         $this->registry->invalidateWorld($wid);
     }
@@ -293,6 +489,9 @@ final class RedstoneEngine
         $this->powerMap = [];
         $this->dirtySet = [];
         $this->dirtyQueue = [];
+        $this->delayedQueue = [];
+        $this->pendingRepeaterUpdates = [];
+        $this->pendingComparatorUpdates = [];
     }
 
     /** @return array{int, int, int} */
