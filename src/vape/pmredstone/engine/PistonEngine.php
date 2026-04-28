@@ -79,7 +79,7 @@ final class PistonEngine {
             return;
         }
 
-        $facing = $piston->getFacing();
+        $facing = Facing::opposite($piston->getFacing());
         $chain = $this->collectPushChain($world, $pistonPos, $facing);
         if ($chain === null) {
             return;
@@ -128,7 +128,7 @@ final class PistonEngine {
             return;
         }
 
-        $facing = $piston->getFacing();
+        $facing = Facing::opposite($piston->getFacing());
         [$dx, $dy, $dz] = Facing::OFFSET[$facing];
         $headPos = $pistonPos->getSide($facing);
         $world->setBlock($headPos, VanillaBlocks::AIR());
@@ -219,7 +219,8 @@ final class PistonEngine {
     }
 
     private function isHeadPresent(World $world, Position $pistonPos, PistonBlock $piston): bool {
-        $headPos = $pistonPos->getSide($piston->getFacing());
+        $facing = Facing::opposite($piston->getFacing());
+        $headPos = $pistonPos->getSide($facing);
         $front = $world->getBlock($headPos);
         $headFacing = BlockUtil::getPistonFacing($front);
         
@@ -238,7 +239,8 @@ final class PistonEngine {
     }
 
     private function ensureHeadState(World $world, Position $pistonPos, PistonBlock $piston, bool $shouldExist): void {
-        $headPos = $pistonPos->getSide($piston->getFacing());
+        $facing = Facing::opposite($piston->getFacing());
+        $headPos = $pistonPos->getSide($facing);
         $front = $world->getBlock($headPos);
         $hasMatchingHead = (
             ($piston->isSticky() && $front instanceof StickyPistonHeadBlock) ||

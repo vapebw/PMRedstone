@@ -62,9 +62,7 @@ class PistonHeadBlock extends Transparent implements AnyFacing {
         }
     }
 
-    protected function describeBlockOnlyState(\pocketmine\data\runtime\RuntimeDataDescriber $w): void {
-        $w->facing(Facing::opposite($this->facing));
-    }
+
 
     protected function recalculateCollisionBoxes(): array {
         $axis = Facing::axis($this->facing);

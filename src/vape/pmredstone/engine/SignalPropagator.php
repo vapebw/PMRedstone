@@ -235,11 +235,15 @@ final class SignalPropagator
             return $requestingBlock instanceof RedstoneWire ? max(0, $stored - 1) : $stored;
         }
 
+        if ($neighbor instanceof Redstone) {
+            return 15;
+        }
+
         if ($neighbor instanceof Opaque) {
-            $stored = $engine->getStoredPower($world, $nx, $ny, $nz);
-            if ($requestingBlock instanceof RedstoneWire) {
+            if ($requestingBlock instanceof Opaque) {
                 return 0;
             }
+            $stored = $engine->getStoredPower($world, $nx, $ny, $nz);
             return max(0, $stored - 1);
         }
 
@@ -264,10 +268,6 @@ final class SignalPropagator
                 return 0;
             }
             return $towardFace === $neighbor->getFacing() ? $neighbor->getOutputSignalStrength() : 0;
-        }
-
-        if ($neighbor instanceof Redstone) {
-            return 15;
         }
 
         if ($neighbor instanceof DaylightSensor && $neighbor instanceof AnalogRedstoneSignalEmitter) {

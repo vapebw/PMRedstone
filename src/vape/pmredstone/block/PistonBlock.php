@@ -34,18 +34,16 @@ use vape\pmredstone\block\PistonHeadBlock;
 class PistonBlock extends Opaque implements AnyFacing
 {
 
-    /*TODO: implement piston head also fix desync or idk what the fuck that is
-    * Still not added cuz welp i think pmmp doesnt have piston head lololo
+    /*TODO: fix that the fucking piston pushes on the wrong fucking side (ej should push on east and pushes on fucking west :sob:)
     * i hope any good contributor can do this UwU
+    * my honest reaction abt this code:
+    * https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExaW1laWZ1YXVxNWVjamd3NTk1Z2NlYjVqb3NnMjBlM2JoMWEyeGY5OSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/qiTx9Rk6KGA4hYLjC7/giphy.gif
     */
     use AnyFacingTrait;
 
     protected bool $extended = false;
 
-    protected function describeBlockOnlyState(RuntimeDataDescriber $w): void
-    {
-        $w->facing(Facing::opposite($this->facing));
-    }
+
 
     public function isSticky(): bool
     {
@@ -88,7 +86,7 @@ class PistonBlock extends Opaque implements AnyFacing
             return Facing::DOWN;
         }
 
-        return Facing::opposite($player->getHorizontalFacing());
+        return $player->getHorizontalFacing();
     }
 
     public function place(BlockTransaction $tx, Item $item, Block $blockReplace, Block $blockClicked, int $face, Vector3 $clickVector, ?Player $player = null): bool
