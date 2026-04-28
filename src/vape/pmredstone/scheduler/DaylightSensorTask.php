@@ -51,8 +51,9 @@ final class DaylightSensorTask extends Task
 
             $sensors = $registry->getSensorsForWorld($world->getId());
 
-            if (count($sensors) === 0) {
+            if (count($sensors) === 0 && !$registry->isSensorWorldBootstrapped($world->getId())) {
                 $this->discoverSensors($world);
+                $registry->markSensorWorldBootstrapped($world->getId());
                 $sensors = $registry->getSensorsForWorld($world->getId());
             }
 
@@ -83,6 +84,7 @@ final class DaylightSensorTask extends Task
             $block = $world->getBlockAt($x, $y, $z);
 
             if (!($block instanceof DaylightSensor) || !($block instanceof AnalogRedstoneSignalEmitter)) {
+                $this->engine->getRegistry()->unregisterSensor(new \pocketmine\world\Position($x, $y, $z, $world));
                 continue;
             }
 
