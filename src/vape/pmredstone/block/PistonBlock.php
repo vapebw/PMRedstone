@@ -44,7 +44,7 @@ class PistonBlock extends Opaque implements AnyFacing
 
     protected function describeBlockOnlyState(RuntimeDataDescriber $w): void
     {
-        $w->facing($this->facing);
+        $w->facing(Facing::opposite($this->facing));
     }
 
     public function isSticky(): bool
