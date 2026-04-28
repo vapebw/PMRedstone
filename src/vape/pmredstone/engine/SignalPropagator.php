@@ -32,6 +32,7 @@ use pocketmine\block\SimplePressurePlate;
 use pocketmine\block\utils\AnalogRedstoneSignalEmitter;
 use pocketmine\block\utils\HorizontalFacing;
 use pocketmine\block\utils\PoweredByRedstone;
+use pocketmine\math\Axis;
 use pocketmine\math\Facing;
 use pocketmine\world\World;
 
@@ -155,9 +156,20 @@ final class SignalPropagator
 
             $neighbor = $world->getBlockAt($nx, $ny, $nz);
             $power = self::getOutputToward($engine, $world, $neighbor, Facing::opposite($face), $nx, $ny, $nz, $wire);
+            if ($power > $max) $max = $power;
 
-            if ($power > $max) {
-                $max = $power;
+            if (Facing::axis($face) !== Axis::Y) {
+                $upPos = $world->getBlockAt($nx, $ny + 1, $nz);
+                if ($upPos instanceof RedstoneWire) {
+                    $power = self::getOutputToward($engine, $world, $upPos, Facing::opposite($face), $nx, $ny + 1, $nz, $wire);
+                    if ($power > $max) $max = $power;
+                }
+
+                $downPos = $world->getBlockAt($nx, $ny - 1, $nz);
+                if ($downPos instanceof RedstoneWire) {
+                    $power = self::getOutputToward($engine, $world, $downPos, Facing::opposite($face), $nx, $ny - 1, $nz, $wire);
+                    if ($power > $max) $max = $power;
+                }
             }
         }
 
