@@ -1,5 +1,19 @@
 <?php
 
+/*
+ * ██╗   ██╗ █████╗ ██████╗ ███████╗
+ * ██║   ██║██╔══██╗██╔══██╗██╔════╝
+ * ██║   ██║███████║██████╔╝█████╗
+ * ╚██╗ ██╔╝██╔══██║██╔═══╝ ██╔══╝
+ *  ╚████╔╝ ██║  ██║██║     ███████╗
+ *   ╚═══╝  ╚═╝  ╚═╝╚═╝     ╚══════╝
+ *
+ * PMRedstone - Full redstone simulation engine for PocketMine-MP 5
+ *
+ * Free to use. Do NOT sell or redistribute this plugin for profit.
+ * GitHub: https://github.com/vapebw
+ */
+
 declare(strict_types=1);
 
 namespace vape\pmredstone\block;
@@ -19,6 +33,11 @@ use vape\pmredstone\block\PistonHeadBlock;
 
 class PistonBlock extends Opaque implements AnyFacing
 {
+
+    /*TODO: implement piston head also fix desync or idk what the fuck that is
+    * Still not added cuz welp i think pmmp doesnt have piston head lololo
+    * i hope any good contributor can do this UwU
+    */
     use AnyFacingTrait;
 
     protected bool $extended = false;
@@ -26,7 +45,6 @@ class PistonBlock extends Opaque implements AnyFacing
     protected function describeBlockOnlyState(RuntimeDataDescriber $w): void
     {
         $w->facing($this->facing);
-        $w->bool($this->extended);
     }
 
     public function isSticky(): bool
@@ -57,36 +75,37 @@ class PistonBlock extends Opaque implements AnyFacing
 
         return parent::onBreak($item, $player, $returnedItems);
     }
-    private function resolvePlacementFacing(Block $blockReplace, ?Player $player, int $face): int
+    private function resolvePlacementFacing(int $face, ?Player $player): int
     {
         if ($player === null) {
             return $face;
         }
 
-        return Facing::fromDirection($player->getDirectionVector());
+        $pitch = $player->getLocation()->pitch;
+        if ($pitch > 45) {
+            return Facing::UP;
+        } elseif ($pitch < -45) {
+            return Facing::DOWN;
+        }
+
+        return Facing::opposite($player->getHorizontalFacing());
     }
 
     public function place(BlockTransaction $tx, Item $item, Block $blockReplace, Block $blockClicked, int $face, Vector3 $clickVector, ?Player $player = null): bool
     {
-        $this->facing = $this->resolvePlacementFacing($blockReplace, $player, $face);
+        $this->facing = $this->resolvePlacementFacing($face, $player);
         $this->extended = false;
 
-        $result = parent::place($tx, $item, $blockReplace, $blockClicked, $face, $clickVector, $player);
+        $pos = $blockReplace->getPosition();
+        Loader::getInstance()->getLogger()->debug(sprintf(
+            "[Piston][PLACE] %d,%d,%d facing=%s",
+            $pos->getFloorX(),
+            $pos->getFloorY(),
+            $pos->getFloorZ(),
+            self::facingName($this->facing)
+        ));
 
-        $plugin = Loader::getInstance();
-        if ($plugin->getRedstoneConfig()->isDebugPiston()) {
-            $plugin->getLogger()->debug(sprintf(
-                "[Piston] Place @ %d,%d,%d face=%s playerFacing=%s storedFacing=%s extended=false",
-                $blockReplace->getPosition()->getFloorX(),
-                $blockReplace->getPosition()->getFloorY(),
-                $blockReplace->getPosition()->getFloorZ(),
-                self::facingName($face),
-                $player !== null ? self::facingName($player->getHorizontalFacing()) : "none",
-                self::facingName($this->facing)
-            ));
-        }
-
-        return $result;
+        return parent::place($tx, $item, $blockReplace, $blockClicked, $face, $clickVector, $player);
     }
 
     public static function facingName(int $facing): string

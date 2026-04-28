@@ -1,5 +1,19 @@
 <?php
 
+/*
+ * ██╗   ██╗ █████╗ ██████╗ ███████╗
+ * ██║   ██║██╔══██╗██╔══██╗██╔════╝
+ * ██║   ██║███████║██████╔╝█████╗
+ * ╚██╗ ██╔╝██╔══██║██╔═══╝ ██╔══╝
+ *  ╚████╔╝ ██║  ██║██║     ███████╗
+ *   ╚═══╝  ╚═╝  ╚═╝╚═╝     ╚══════╝
+ *
+ * PMRedstone - Full redstone simulation engine for PocketMine-MP 5
+ *
+ * Free to use. Do NOT sell or redistribute this plugin for profit.
+ * GitHub: https://github.com/vapebw
+ */
+
 declare(strict_types=1);
 
 namespace vape\pmredstone\block;
@@ -11,6 +25,7 @@ use pocketmine\block\BlockTypeInfo;
 use pocketmine\block\RuntimeBlockStateRegistry;
 use pocketmine\data\bedrock\block\BlockTypeNames as Ids;
 use pocketmine\data\bedrock\block\convert\Model;
+use pocketmine\data\bedrock\block\convert\property\BoolProperty;
 use pocketmine\data\bedrock\block\convert\property\CommonProperties;
 use pocketmine\item\StringToItemParser;
 use pocketmine\world\format\io\GlobalBlockStateHandlers;
@@ -31,13 +46,15 @@ final class PistonBlockRegistry {
         }
         self::$bootstrapped = true;
 
-        $breakInfo = new BlockTypeInfo(new BlockBreakInfo(1.5, BlockToolType::PICKAXE, 0, 7.5));
+        $pistonInfo = new BlockTypeInfo(new BlockBreakInfo(1.5, BlockToolType::PICKAXE, 0, 7.5));
+        $pistonId = new BlockIdentifier(PistonBlockIds::piston(), \vape\pmredstone\tile\PistonArmTile::class);
+        $stickyPistonId = new BlockIdentifier(PistonBlockIds::stickyPiston(), \vape\pmredstone\tile\PistonArmTile::class);
+        
+        self::$piston = new PistonBlock($pistonId, "Piston", $pistonInfo);
+        self::$stickyPiston = new StickyPistonBlock($stickyPistonId, "Sticky Piston", $pistonInfo);
+        self::$pistonHead = new PistonHeadBlock(new BlockIdentifier(PistonBlockIds::pistonHead(), \vape\pmredstone\tile\PistonArmTile::class), "Piston Head", $pistonInfo);
+        self::$stickyPistonHead = new StickyPistonHeadBlock(new BlockIdentifier(PistonBlockIds::stickyPistonHead(), \vape\pmredstone\tile\PistonArmTile::class), "Sticky Piston Head", $pistonInfo);
         $indestructible = new BlockTypeInfo(BlockBreakInfo::indestructible());
-
-        self::$piston = new PistonBlock(new BlockIdentifier(PistonBlockIds::piston()), "Piston", $breakInfo);
-        self::$stickyPiston = new StickyPistonBlock(new BlockIdentifier(PistonBlockIds::stickyPiston()), "Sticky Piston", $breakInfo);
-        self::$pistonHead = new PistonHeadBlock(new BlockIdentifier(PistonBlockIds::pistonHead()), "Piston Head", $breakInfo);
-        self::$stickyPistonHead = new StickyPistonHeadBlock(new BlockIdentifier(PistonBlockIds::stickyPistonHead()), "Sticky Piston Head", $breakInfo);
         self::$movingBlock = new MovingBlock(new BlockIdentifier(PistonBlockIds::movingBlock()), "Moving Block", $indestructible);
 
         $runtime = RuntimeBlockStateRegistry::getInstance();
@@ -49,70 +66,16 @@ final class PistonBlockRegistry {
 
         $registrar = GlobalBlockStateHandlers::getRegistrar();
         $common = CommonProperties::getInstance();
-        $registrar->mapModel(Model::create(self::$piston, Ids::PISTON)->properties([
-            new \pocketmine\data\bedrock\block\convert\property\ValueFromIntProperty(
-                \pocketmine\data\bedrock\block\BlockStateNames::FACING_DIRECTION,
-                \pocketmine\data\bedrock\block\convert\property\IntFromRawStateMap::int([
-                    \pocketmine\math\Facing::DOWN => 0,
-                    \pocketmine\math\Facing::UP => 1,
-                    \pocketmine\math\Facing::NORTH => 3,
-                    \pocketmine\math\Facing::SOUTH => 2,
-                    \pocketmine\math\Facing::WEST => 5,
-                    \pocketmine\math\Facing::EAST => 4
-                ]),
-                fn(PistonBlock $b) => $b->getFacing(),
-                fn(PistonBlock $b, int $v) => $b->setFacing($v)
-            ),
-            new \pocketmine\data\bedrock\block\convert\property\BoolProperty("piston_bit", fn(PistonBlock $b) => $b->isExtended(), fn(PistonBlock $b, bool $v) => $b->setExtended($v))
-        ]));
-        $registrar->mapModel(Model::create(self::$stickyPiston, Ids::STICKY_PISTON)->properties([
-            new \pocketmine\data\bedrock\block\convert\property\ValueFromIntProperty(
-                \pocketmine\data\bedrock\block\BlockStateNames::FACING_DIRECTION,
-                \pocketmine\data\bedrock\block\convert\property\IntFromRawStateMap::int([
-                    \pocketmine\math\Facing::DOWN => 0,
-                    \pocketmine\math\Facing::UP => 1,
-                    \pocketmine\math\Facing::NORTH => 3,
-                    \pocketmine\math\Facing::SOUTH => 2,
-                    \pocketmine\math\Facing::WEST => 5,
-                    \pocketmine\math\Facing::EAST => 4
-                ]),
-                fn(StickyPistonBlock $b) => $b->getFacing(),
-                fn(StickyPistonBlock $b, int $v) => $b->setFacing($v)
-            ),
-            new \pocketmine\data\bedrock\block\convert\property\BoolProperty("piston_bit", fn(StickyPistonBlock $b) => $b->isExtended(), fn(StickyPistonBlock $b, bool $v) => $b->setExtended($v))
-        ]));
-        $registrar->mapModel(Model::create(self::$pistonHead, Ids::PISTON_ARM_COLLISION)->properties([
-            new \pocketmine\data\bedrock\block\convert\property\ValueFromIntProperty(
-                \pocketmine\data\bedrock\block\BlockStateNames::FACING_DIRECTION,
-                \pocketmine\data\bedrock\block\convert\property\IntFromRawStateMap::int([
-                    \pocketmine\math\Facing::DOWN => 0,
-                    \pocketmine\math\Facing::UP => 1,
-                    \pocketmine\math\Facing::NORTH => 3,
-                    \pocketmine\math\Facing::SOUTH => 2,
-                    \pocketmine\math\Facing::WEST => 5,
-                    \pocketmine\math\Facing::EAST => 4
-                ]),
-                fn(PistonHeadBlock $b) => $b->getFacing(),
-                fn(PistonHeadBlock $b, int $v) => $b->setFacing($v)
-            ),
-            new \pocketmine\data\bedrock\block\convert\property\BoolProperty("piston_type_bit", fn(PistonHeadBlock $b) => $b->isSticky(), fn($b, $v) => null)
-        ]));
-        $registrar->mapModel(Model::create(self::$stickyPistonHead, Ids::STICKY_PISTON_ARM_COLLISION)->properties([
-            new \pocketmine\data\bedrock\block\convert\property\ValueFromIntProperty(
-                \pocketmine\data\bedrock\block\BlockStateNames::FACING_DIRECTION,
-                \pocketmine\data\bedrock\block\convert\property\IntFromRawStateMap::int([
-                    \pocketmine\math\Facing::DOWN => 0,
-                    \pocketmine\math\Facing::UP => 1,
-                    \pocketmine\math\Facing::NORTH => 3,
-                    \pocketmine\math\Facing::SOUTH => 2,
-                    \pocketmine\math\Facing::WEST => 5,
-                    \pocketmine\math\Facing::EAST => 4
-                ]),
-                fn(StickyPistonHeadBlock $b) => $b->getFacing(),
-                fn(StickyPistonHeadBlock $b, int $v) => $b->setFacing($v)
-            ),
-            new \pocketmine\data\bedrock\block\convert\property\BoolProperty("piston_type_bit", fn(StickyPistonHeadBlock $b) => $b->isSticky(), fn($b, $v) => null)
-        ]));
+        $registrar->mapModel(Model::create(self::$piston, Ids::PISTON)
+            ->properties([
+                $common->anyFacingClassic
+            ]));
+        $registrar->mapModel(Model::create(self::$stickyPiston, Ids::STICKY_PISTON)
+            ->properties([
+                $common->anyFacingClassic
+            ]));
+        $registrar->mapModel(Model::create(self::$pistonHead, Ids::PISTON_ARM_COLLISION)->properties([$common->anyFacingClassic]));
+        $registrar->mapModel(Model::create(self::$stickyPistonHead, Ids::STICKY_PISTON_ARM_COLLISION)->properties([$common->anyFacingClassic]));
         $registrar->mapModel(Model::create(self::$movingBlock, Ids::MOVING_BLOCK));
 
         $parser = StringToItemParser::getInstance();

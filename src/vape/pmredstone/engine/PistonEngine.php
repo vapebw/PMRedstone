@@ -12,6 +12,7 @@ use pocketmine\world\World;
 use vape\pmredstone\block\PistonBlock;
 use vape\pmredstone\block\PistonBlockRegistry;
 use vape\pmredstone\block\PistonHeadBlock;
+use vape\pmredstone\tile\PistonArmTile;
 use vape\pmredstone\block\StickyPistonHeadBlock;
 use vape\pmredstone\config\RedstoneConfig;
 use vape\pmredstone\util\BlockUtil;
@@ -36,8 +37,8 @@ final class PistonEngine {
     }
 
     /**
-     * Returns an ordered list of positions to push, starting closest to piston.
-     * Returns null if push is blocked.
+     * returns an ordered list of positions to push, starting clo(s)est to piston
+     * returns null if push is blocked.
      *
      * @return Position[]|null
      */
@@ -74,7 +75,7 @@ final class PistonEngine {
     }
 
     public function executePush(World $world, Position $pistonPos, PistonBlock $piston): void {
-        if ($piston->isExtended()) {
+        if ($this->isHeadPresent($world, $pistonPos, $piston)) {
             return;
         }
 
@@ -104,26 +105,26 @@ final class PistonEngine {
 
         $sticky = $piston->isSticky();
         $world->setBlock($pistonPos, (clone $piston)->setExtended(true));
+        $this->updatePistonTile($world, $pistonPos, true, $sticky);
         $headPos = $pistonPos->getSide($facing);
         $visualBlock = $this->placeHeadVisual($world, $headPos, $sticky, $facing);
-        $this->engine->notifyChange($headPos);
+        $this->updatePistonTile($world, $headPos, true, $sticky);
         $this->engine->notifyChange($pistonPos);
+        $this->engine->notifyChange($headPos);
 
         if ($this->cfg->isDebugPiston()) {
             $this->engine->getPlugin()->getLogger()->debug(sprintf(
-                "[Piston] Extend @ %d,%d,%d facing=%s moved=%d baseExtended=true head=%s",
-                $pistonPos->getFloorX(),
-                $pistonPos->getFloorY(),
-                $pistonPos->getFloorZ(),
+                "[Piston][EXTEND] facing=%s headPos=%d,%d,%d",
                 PistonBlock::facingName($facing),
-                count($chain),
-                $visualBlock->getName()
+                $headPos->getFloorX(),
+                $headPos->getFloorY(),
+                $headPos->getFloorZ()
             ));
         }
     }
 
     public function executeRetract(World $world, Position $pistonPos, PistonBlock $piston): void {
-        if (!$piston->isExtended()) {
+        if (!$this->isHeadPresent($world, $pistonPos, $piston)) {
             return;
         }
 
@@ -133,6 +134,7 @@ final class PistonEngine {
         $world->setBlock($headPos, VanillaBlocks::AIR());
 
         $world->setBlock($pistonPos, (clone $piston)->setExtended(false));
+        $this->updatePistonTile($world, $pistonPos, false, $piston->isSticky());
 
         $this->engine->notifyChange($headPos);
         $this->engine->notifyChange($pistonPos);
@@ -164,12 +166,8 @@ final class PistonEngine {
 
         if ($this->cfg->isDebugPiston()) {
             $this->engine->getPlugin()->getLogger()->debug(sprintf(
-                "[Piston] Retract @ %d,%d,%d facing=%s sticky=%s baseExtended=false",
-                $pistonPos->getFloorX(),
-                $pistonPos->getFloorY(),
-                $pistonPos->getFloorZ(),
-                PistonBlock::facingName($facing),
-                $piston->isSticky() ? "true" : "false"
+                "[Piston][RETRACT] facing=%s headExists=true",
+                PistonBlock::facingName($facing)
             ));
         }
     }
@@ -193,23 +191,50 @@ final class PistonEngine {
             $pos->getFloorZ()
         ) > 0;
 
+        $headExists = $this->isHeadPresent($world, $pos, $block);
+
         if ($powered) {
-            if ($block->isExtended()) {
+            if ($headExists) {
                 $this->ensureHeadState($world, $pos, $block, true);
                 return;
             }
 
-            $this->ensureHeadState($world, $pos, $block, false);
             $this->executePush($world, $pos, $block);
             return;
         }
 
-        if ($block->isExtended()) {
+        if ($headExists) {
             $this->executeRetract($world, $pos, $block);
             return;
         }
 
+        if ($this->cfg->isDebugPiston()) {
+            $this->engine->getPlugin()->getLogger()->debug(sprintf(
+                "[Piston][RETRACT] facing=%s headExists=false",
+                PistonBlock::facingName($block->getFacing())
+            ));
+        }
+
         $this->ensureHeadState($world, $pos, $block, false);
+    }
+
+    private function isHeadPresent(World $world, Position $pistonPos, PistonBlock $piston): bool {
+        $headPos = $pistonPos->getSide($piston->getFacing());
+        $front = $world->getBlock($headPos);
+        $headFacing = BlockUtil::getPistonFacing($front);
+        
+        if ($this->cfg->isDebugPiston()) {
+            $this->engine->getPlugin()->getLogger()->debug(sprintf(
+                "[Piston][CHECK] baseFacing=%s headFacing=%s",
+                PistonBlock::facingName($piston->getFacing()),
+                PistonBlock::facingName($headFacing)
+            ));
+        }
+
+        return (
+            ($piston->isSticky() && $front instanceof StickyPistonHeadBlock) ||
+            (!$piston->isSticky() && $front instanceof PistonHeadBlock && !$front instanceof StickyPistonHeadBlock)
+        ) && $headFacing === $piston->getFacing();
     }
 
     private function ensureHeadState(World $world, Position $pistonPos, PistonBlock $piston, bool $shouldExist): void {
@@ -223,6 +248,7 @@ final class PistonEngine {
         if ($shouldExist) {
             if (!$hasMatchingHead) {
                 $this->placeHeadVisual($world, $headPos, $piston->isSticky(), $piston->getFacing());
+                $this->updatePistonTile($world, $headPos, true, $piston->isSticky());
                 $this->engine->notifyChange($headPos);
             }
             return;
@@ -265,5 +291,25 @@ final class PistonEngine {
         }
 
         return $fallback;
+    }
+
+    private function updatePistonTile(World $world, Position $pos, bool $extended, bool $sticky): void {
+        $tile = $world->getTile($pos);
+        if (!$tile instanceof PistonArmTile) {
+            $tile = new PistonArmTile($world, $pos);
+            $world->addTile($tile);
+        }
+        $tile->setSticky($sticky);
+        if ($extended) {
+            $tile->setState(2);
+            $tile->setNewState(2);
+            $tile->setProgress(1.0);
+            $tile->setLastProgress(1.0);
+        } else {
+            $tile->setState(0);
+            $tile->setNewState(0);
+            $tile->setProgress(0.0);
+            $tile->setLastProgress(0.0);
+        }
     }
 }

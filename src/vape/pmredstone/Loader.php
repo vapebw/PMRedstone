@@ -26,6 +26,8 @@ use vape\pmredstone\listener\RedstoneListener;
 use vape\pmredstone\scheduler\ButtonSyncTask;
 use vape\pmredstone\scheduler\DaylightSensorTask;
 use vape\pmredstone\scheduler\PressurePlateTask;
+use pocketmine\block\tile\TileFactory;
+use vape\pmredstone\tile\PistonArmTile;
 use vape\pmredstone\scheduler\RedstoneTickTask;
 
 final class Loader extends PluginBase
@@ -48,6 +50,7 @@ final class Loader extends PluginBase
         $this->saveDefaultConfig();
         $this->redstoneConfig = new RedstoneConfig($this->getConfig());
         PistonBlockRegistry::bootstrap();
+        TileFactory::getInstance()->register(PistonArmTile::class, ["PistonArm", "minecraft:piston_arm"]);
 
         $this->engine = new RedstoneEngine($this, $this->redstoneConfig);
 
