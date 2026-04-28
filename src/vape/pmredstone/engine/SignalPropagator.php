@@ -159,7 +159,7 @@ final class SignalPropagator
             if ($power > $max) $max = $power;
 
             if (Facing::axis($face) !== Axis::Y) {
-                if (!$world->getBlockAt($x, $y + 1, $z)->isOpaque()) {
+                if (!($world->getBlockAt($x, $y + 1, $z) instanceof Opaque)) {
                     $upPos = $world->getBlockAt($nx, $ny + 1, $nz);
                     if ($upPos instanceof RedstoneWire) {
                         $power = self::getOutputToward($engine, $world, $upPos, Facing::opposite($face), $nx, $ny + 1, $nz, $wire);
