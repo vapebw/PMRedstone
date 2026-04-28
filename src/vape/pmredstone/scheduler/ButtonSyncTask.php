@@ -53,9 +53,6 @@ final class ButtonSyncTask extends Task
 
                 if ($pressed !== $last) {
                     $this->engine->notifyChange($block->getPosition());
-                    foreach ($block->getPosition()->getWorld()->getBlock($block->getPosition())->getNeighbors() as $neighbor) {
-                        $this->engine->notifyChange($neighbor->getPosition());
-                    }
                 }
 
                 $this->lastPressedState[$wid][$key] = $pressed;
