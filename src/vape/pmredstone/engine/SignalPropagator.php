@@ -37,6 +37,7 @@ use pocketmine\world\World;
 
 final class SignalPropagator
 {
+    private const COMPARATOR_DELAY_TICKS = 2;
 
     public static function calculatePowerAt(
         RedstoneEngine $engine,
@@ -46,6 +47,14 @@ final class SignalPropagator
         int $y,
         int $z
     ): int {
+        if ($block instanceof RedstoneRepeater && $block instanceof PoweredByRedstone) {
+            return $block->isPowered() ? 15 : 0;
+        }
+
+        if ($block instanceof RedstoneComparator && $block instanceof AnalogRedstoneSignalEmitter) {
+            return $block->getOutputSignalStrength();
+        }
+
         if ($block instanceof RedstoneWire) {
             return self::calculateWirePowerAt($engine, $world, $x, $y, $z);
         }
@@ -83,6 +92,47 @@ final class SignalPropagator
         return $max;
     }
 
+    public static function calculateRepeaterInput(
+        RedstoneEngine $engine,
+        World $world,
+        RedstoneRepeater $block,
+        int $x,
+        int $y,
+        int $z
+    ): int {
+        return self::getSignalFromFace($engine, $world, $x, $y, $z, Facing::opposite($block->getFacing()), $block);
+    }
+
+    public static function calculateComparatorOutput(
+        RedstoneEngine $engine,
+        World $world,
+        RedstoneComparator $block,
+        int $x,
+        int $y,
+        int $z
+    ): int {
+        $back = Facing::opposite($block->getFacing());
+        $left = Facing::rotateY($block->getFacing(), false);
+        $right = Facing::rotateY($block->getFacing(), true);
+
+        $mainInput = self::getSignalFromFace($engine, $world, $x, $y, $z, $back, $block);
+        $sideInput = max(
+            self::getSignalFromFace($engine, $world, $x, $y, $z, $left, $block),
+            self::getSignalFromFace($engine, $world, $x, $y, $z, $right, $block)
+        );
+
+        if ($block->isSubtractMode()) {
+            return max(0, $mainInput - $sideInput);
+        }
+
+        return $mainInput >= $sideInput ? $mainInput : 0;
+    }
+
+    public static function getComparatorDelayTicks() : int
+    {
+        return self::COMPARATOR_DELAY_TICKS;
+    }
+
     private static function calculateWirePowerAt(
         RedstoneEngine $engine,
         World $world,
@@ -105,10 +155,6 @@ final class SignalPropagator
 
             $neighbor = $world->getBlockAt($nx, $ny, $nz);
             $power = self::getOutputToward($engine, $world, $neighbor, Facing::opposite($face), $nx, $ny, $nz, $wire);
-
-            if ($neighbor instanceof RedstoneWire && $neighbor instanceof AnalogRedstoneSignalEmitter) {
-                $power = max(0, $engine->getStoredPower($world, $nx, $ny, $nz) - 1);
-            }
 
             if ($power > $max) {
                 $max = $power;
@@ -184,8 +230,9 @@ final class SignalPropagator
             return $towardFace !== Facing::DOWN ? 15 : 0;
         }
 
-        if ($neighbor instanceof RedstoneWire) {
-            return 0;
+        if ($neighbor instanceof RedstoneWire && $neighbor instanceof AnalogRedstoneSignalEmitter) {
+            $stored = $engine->getStoredPower($world, $nx, $ny, $nz);
+            return $requestingBlock instanceof RedstoneWire ? max(0, $stored - 1) : $stored;
         }
 
         if ($neighbor instanceof Opaque) {
@@ -228,6 +275,28 @@ final class SignalPropagator
         }
 
         return 0;
+    }
+
+    private static function getSignalFromFace(
+        RedstoneEngine $engine,
+        World $world,
+        int $x,
+        int $y,
+        int $z,
+        int $face,
+        Block $requestingBlock
+    ) : int {
+        [$dx, $dy, $dz] = Facing::OFFSET[$face];
+        $nx = $x + $dx;
+        $ny = $y + $dy;
+        $nz = $z + $dz;
+
+        if (!$world->isChunkLoaded($nx >> 4, $nz >> 4)) {
+            return 0;
+        }
+
+        $neighbor = $world->getBlockAt($nx, $ny, $nz);
+        return self::getOutputToward($engine, $world, $neighbor, Facing::opposite($face), $nx, $ny, $nz, $requestingBlock);
     }
 
     public static function isSource(Block $block): bool
