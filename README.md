@@ -29,7 +29,6 @@ redstone:
 pistons:
   enabled: true
   max-push-distance: 12
-  beta-mode: true
 ```
 
 ## Contributing
