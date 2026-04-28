@@ -32,8 +32,9 @@ final class PressurePlateTask extends Task
 
             $plates = $registry->getPlatesForWorld($world->getId());
 
-            if (count($plates) === 0) {
+            if (count($plates) === 0 && !$registry->isPlateWorldBootstrapped($world->getId())) {
                 $this->discoverPlates($world);
+                $registry->markPlateWorldBootstrapped($world->getId());
                 $plates = $registry->getPlatesForWorld($world->getId());
             }
 
@@ -55,6 +56,7 @@ final class PressurePlateTask extends Task
             $block = $world->getBlockAt($x, $y, $z);
 
             if (!($block instanceof SimplePressurePlate)) {
+                $this->engine->getRegistry()->unregisterPlate(new \pocketmine\world\Position($x, $y, $z, $world));
                 continue;
             }
 
