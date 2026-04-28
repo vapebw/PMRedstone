@@ -32,6 +32,12 @@ final class PositionRegistry
     /** @var array<int, array<string, array{int, int, int}>> worldId => key => [x, y, z] */
     private array $buttons = [];
 
+    /** @var array<int, true> */
+    private array $bootstrappedSensorWorlds = [];
+
+    /** @var array<int, true> */
+    private array $bootstrappedPlateWorlds = [];
+
     public function registerSensor(Position $pos): void
     {
         $wid = $pos->getWorld()->getId();
@@ -101,9 +107,35 @@ final class PositionRegistry
         return $this->buttons[$worldId] ?? [];
     }
 
+    public function markSensorWorldBootstrapped(int $worldId): void
+    {
+        $this->bootstrappedSensorWorlds[$worldId] = true;
+    }
+
+    public function isSensorWorldBootstrapped(int $worldId): bool
+    {
+        return isset($this->bootstrappedSensorWorlds[$worldId]);
+    }
+
+    public function markPlateWorldBootstrapped(int $worldId): void
+    {
+        $this->bootstrappedPlateWorlds[$worldId] = true;
+    }
+
+    public function isPlateWorldBootstrapped(int $worldId): bool
+    {
+        return isset($this->bootstrappedPlateWorlds[$worldId]);
+    }
+
     public function invalidateWorld(int $worldId): void
     {
-        unset($this->sensors[$worldId], $this->plates[$worldId], $this->buttons[$worldId]);
+        unset(
+            $this->sensors[$worldId],
+            $this->plates[$worldId],
+            $this->buttons[$worldId],
+            $this->bootstrappedSensorWorlds[$worldId],
+            $this->bootstrappedPlateWorlds[$worldId]
+        );
     }
 
     public function getSensorCount(): int
