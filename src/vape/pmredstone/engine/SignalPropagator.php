@@ -159,10 +159,13 @@ final class SignalPropagator
             if ($power > $max) $max = $power;
 
             if (Facing::axis($face) !== Axis::Y) {
-                $upPos = $world->getBlockAt($nx, $ny + 1, $nz);
-                if ($upPos instanceof RedstoneWire) {
-                    $power = self::getOutputToward($engine, $world, $upPos, Facing::opposite($face), $nx, $ny + 1, $nz, $wire);
-                    if ($power > $max) $max = $power;
+                // Check 1 block UP (only if no block is blocking the path above the current wire)
+                if (!$world->getBlockAt($x, $y + 1, $z)->isOpaque()) {
+                    $upPos = $world->getBlockAt($nx, $ny + 1, $nz);
+                    if ($upPos instanceof RedstoneWire) {
+                        $power = self::getOutputToward($engine, $world, $upPos, Facing::opposite($face), $nx, $ny + 1, $nz, $wire);
+                        if ($power > $max) $max = $power;
+                    }
                 }
 
                 $downPos = $world->getBlockAt($nx, $ny - 1, $nz);
