@@ -15,6 +15,7 @@ use pocketmine\math\Vector3;
 use pocketmine\player\Player;
 use pocketmine\world\BlockTransaction;
 use vape\pmredstone\Loader;
+use vape\pmredstone\block\PistonHeadBlock;
 
 class PistonBlock extends Opaque implements AnyFacing
 {
@@ -56,29 +57,13 @@ class PistonBlock extends Opaque implements AnyFacing
 
         return parent::onBreak($item, $player, $returnedItems);
     }
-
     private function resolvePlacementFacing(Block $blockReplace, ?Player $player, int $face): int
     {
         if ($player === null) {
             return $face;
         }
 
-        $playerPos = $player->getLocation();
-        $dx = abs($playerPos->getX() - $blockReplace->getPosition()->getX());
-        $dz = abs($playerPos->getZ() - $blockReplace->getPosition()->getZ());
-        $dy = $playerPos->getY() - $blockReplace->getPosition()->getY();
-
-        if ($dx < 2.0 && $dz < 2.0) {
-            if ($dy > 2.0) {
-                return Facing::DOWN;
-            }
-
-            if ($dy < 0.0) {
-                return Facing::UP;
-            }
-        }
-
-        return $player->getHorizontalFacing();
+        return Facing::fromDirection($player->getDirectionVector());
     }
 
     public function place(BlockTransaction $tx, Item $item, Block $blockReplace, Block $blockClicked, int $face, Vector3 $clickVector, ?Player $player = null): bool
