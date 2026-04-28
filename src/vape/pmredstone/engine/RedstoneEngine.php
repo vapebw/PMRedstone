@@ -233,15 +233,13 @@ final class RedstoneEngine
         $isPowered = $now > 0;
 
         if ($block instanceof RedstoneWire && $block instanceof AnalogRedstoneSignalEmitter) {
-            $block->setOutputSignalStrength($now);
-            $world->setBlock($pos, $block);
+            $world->setBlock($pos, $block->setOutputSignalStrength($now));
             return;
         }
 
         if ($block instanceof RedstoneLamp && $block instanceof PoweredByRedstone) {
             if ($wasPowered !== $isPowered) {
-                $block->setPowered($isPowered);
-                $world->setBlock($pos, $block);
+                $world->setBlock($pos, $block->setPowered($isPowered));
             }
             return;
         }
@@ -252,8 +250,9 @@ final class RedstoneEngine
 
         if ($block instanceof RedstoneRepeater || $block instanceof RedstoneComparator || $block instanceof RedstoneTorch) {
             if ($wasPowered !== $isPowered) {
-                if ($block instanceof PoweredByRedstone)
-                    $block->setPowered($isPowered);
+                if ($block instanceof PoweredByRedstone) {
+                    $block = $block->setPowered($isPowered);
+                }
                 $world->setBlock($pos, $block);
                 foreach (Facing::ALL as $face) {
                     $side = $pos->getSide($face);
@@ -377,7 +376,7 @@ final class RedstoneEngine
             return;
         }
 
-        $block->setPowered($desiredPowered);
+        $block = $block->setPowered($desiredPowered);
         $world->setBlock($pos, $block);
         $this->syncStoredPower($wid, $key, $targetPower);
         $this->notifyChange($pos);
@@ -417,8 +416,8 @@ final class RedstoneEngine
             return;
         }
 
-        $block->setPowered($desiredPowered);
-        $block->setOutputSignalStrength($targetPower);
+        $block = $block->setPowered($desiredPowered);
+        $block = $block->setOutputSignalStrength($targetPower);
         $world->setBlock($pos, $block);
         $this->syncStoredPower($wid, $key, $targetPower);
         $this->notifyChange($pos);
