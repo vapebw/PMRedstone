@@ -1,5 +1,8 @@
 # PMRedstone
 
+> [!IMPORTANT]
+> This project is under active development. Features and internal logic are subject to continuous improvement and changes.
+
 PMRedstone is a high-performance, standalone redstone simulation engine specifically engineered for PocketMine-MP 5. It provides a robust alternative to the core's limited redstone support, featuring a custom propagation logic and a budget-controlled update system.
 
 ## Core Features
