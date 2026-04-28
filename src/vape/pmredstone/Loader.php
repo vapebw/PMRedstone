@@ -19,6 +19,7 @@ declare(strict_types=1);
 namespace vape\pmredstone;
 
 use pocketmine\plugin\PluginBase;
+use vape\pmredstone\block\PistonBlockRegistry;
 use vape\pmredstone\config\RedstoneConfig;
 use vape\pmredstone\engine\RedstoneEngine;
 use vape\pmredstone\listener\RedstoneListener;
@@ -46,6 +47,7 @@ final class Loader extends PluginBase
 
         $this->saveDefaultConfig();
         $this->redstoneConfig = new RedstoneConfig($this->getConfig());
+        PistonBlockRegistry::bootstrap();
 
         $this->engine = new RedstoneEngine($this, $this->redstoneConfig);
 
@@ -87,6 +89,10 @@ final class Loader extends PluginBase
 
         if ($cfg->isDebugEnabled()) {
             $this->getLogger()->warning("Debug mode is ON - disable in production.");
+        }
+
+        if ($cfg->isPistonsEnabled()) {
+            $this->getLogger()->debug("PMRedstone piston support registered custom plugin piston blocks.");
         }
     }
 
