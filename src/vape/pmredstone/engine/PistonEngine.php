@@ -1,19 +1,5 @@
 <?php
 
-/*
- * ██╗   ██╗ █████╗ ██████╗ ███████╗
- * ██║   ██║██╔══██╗██╔══██╗██╔════╝
- * ██║   ██║███████║██████╔╝█████╗
- * ╚██╗ ██╔╝██╔══██║██╔═══╝ ██╔══╝
- *  ╚████╔╝ ██║  ██║██║     ███████╗
- *   ╚═══╝  ╚═╝  ╚═╝╚═╝     ╚══════╝
- *
- * PMRedstone - Full redstone simulation engine for PocketMine-MP 5
- *
- * Free to use. Do NOT sell or redistribute this plugin for profit.
- * GitHub: https://github.com/vapebw
- */
-
 declare(strict_types=1);
 
 namespace vape\pmredstone\engine;
@@ -23,8 +9,11 @@ use pocketmine\block\VanillaBlocks;
 use pocketmine\math\Facing;
 use pocketmine\world\Position;
 use pocketmine\world\World;
+use vape\pmredstone\block\PistonBlock;
+use vape\pmredstone\block\PistonBlockRegistry;
+use vape\pmredstone\block\PistonHeadBlock;
+use vape\pmredstone\block\StickyPistonHeadBlock;
 use vape\pmredstone\config\RedstoneConfig;
-use vape\pmredstone\scheduler\PistonMoveTask;
 use vape\pmredstone\util\BlockUtil;
 
 final class PistonEngine {
@@ -39,42 +28,11 @@ final class PistonEngine {
             return;
         }
 
-        if ($isPowered === $wasPowered) {
+        if ($this->cfg->isPistonWorldDisabled($pos->getWorld()->getFolderName())) {
             return;
         }
 
-        $worldName = $pos->getWorld()->getFolderName();
-
-        if ($this->cfg->isPistonWorldDisabled($worldName)) {
-            return;
-        }
-
-        $facing = BlockUtil::getPistonFacing($block);
-        $sticky = BlockUtil::isStickyPiston($block);
-
-        if ($isPowered) {
-            $this->schedulePush($pos, $facing, $sticky);
-        } else {
-            $this->scheduleRetract($pos, $facing, $sticky);
-        }
-    }
-
-    private function schedulePush(Position $pos, int $facing, bool $sticky): void {
-        $this->engine->getPlugin()->getScheduler()->scheduleDelayedTask(
-            new PistonMoveTask($this->engine, $pos, $facing, $sticky, true),
-            $this->cfg->getPistonPushDelay()
-        );
-    }
-
-    private function scheduleRetract(Position $pos, int $facing, bool $sticky): void {
-        if (!$sticky && !$this->cfg->isStickyRetract()) {
-            return;
-        }
-
-        $this->engine->getPlugin()->getScheduler()->scheduleDelayedTask(
-            new PistonMoveTask($this->engine, $pos, $facing, $sticky, false),
-            $this->cfg->getPistonRetractDelay()
-        );
+        $this->reconcilePiston($pos, $block, $isPowered);
     }
 
     /**
@@ -85,29 +43,27 @@ final class PistonEngine {
      */
     public function collectPushChain(World $world, Position $pistonPos, int $facing): ?array {
         [$dx, $dy, $dz] = Facing::OFFSET[$facing];
-        $chain    = [];
-        $maxPush  = $this->cfg->getPistonMaxPush();
+        $chain = [];
+        $maxPush = $this->cfg->getPistonMaxPush();
 
         for ($i = 1; $i <= $maxPush + 1; $i++) {
-            $tx = (int) $pistonPos->x + ($dx * $i);
-            $ty = (int) $pistonPos->y + ($dy * $i);
-            $tz = (int) $pistonPos->z + ($dz * $i);
+            $tx = $pistonPos->getFloorX() + ($dx * $i);
+            $ty = $pistonPos->getFloorY() + ($dy * $i);
+            $tz = $pistonPos->getFloorZ() + ($dz * $i);
 
-            if (!$world->isChunkLoaded($tx >> 4, $tz >> 4)) {
+            if (
+                !$world->isInWorld($tx, $ty, $tz) ||
+                !$world->isChunkLoaded($tx >> 4, $tz >> 4)
+            ) {
                 return null;
             }
 
             $target = $world->getBlockAt($tx, $ty, $tz);
-
             if ($target->getTypeId() === VanillaBlocks::AIR()->getTypeId()) {
                 return $chain;
             }
 
-            if (!BlockUtil::isMovable($target)) {
-                return null;
-            }
-
-            if (count($chain) >= $maxPush) {
+            if (!BlockUtil::isMovable($target) || count($chain) >= $maxPush) {
                 return null;
             }
 
@@ -117,9 +73,13 @@ final class PistonEngine {
         return null;
     }
 
-    public function executePush(World $world, Position $pistonPos, int $facing, bool $sticky): void {
-        $chain = $this->collectPushChain($world, $pistonPos, $facing);
+    public function executePush(World $world, Position $pistonPos, PistonBlock $piston): void {
+        if ($piston->isExtended()) {
+            return;
+        }
 
+        $facing = $piston->getFacing();
+        $chain = $this->collectPushChain($world, $pistonPos, $facing);
         if ($chain === null) {
             return;
         }
@@ -128,13 +88,13 @@ final class PistonEngine {
 
         for ($i = count($chain) - 1; $i >= 0; $i--) {
             $from = $chain[$i];
-            $to   = new Position(
-                (int) $from->x + $dx,
-                (int) $from->y + $dy,
-                (int) $from->z + $dz,
+            $to = new Position(
+                $from->getFloorX() + $dx,
+                $from->getFloorY() + $dy,
+                $from->getFloorZ() + $dz,
                 $world
             );
-            $movingBlock = $world->getBlockAt((int) $from->x, (int) $from->y, (int) $from->z);
+            $movingBlock = $world->getBlock($from);
             $world->setBlock($to, $movingBlock);
             $world->setBlock($from, VanillaBlocks::AIR());
 
@@ -142,59 +102,168 @@ final class PistonEngine {
             $this->engine->notifyChange($from);
         }
 
+        $sticky = $piston->isSticky();
+        $world->setBlock($pistonPos, (clone $piston)->setExtended(true));
+        $headPos = $pistonPos->getSide($facing);
+        $visualBlock = $this->placeHeadVisual($world, $headPos, $sticky, $facing);
+        $this->engine->notifyChange($headPos);
+        $this->engine->notifyChange($pistonPos);
+
         if ($this->cfg->isDebugPiston()) {
             $this->engine->getPlugin()->getLogger()->debug(sprintf(
-                "[Piston] Push @ %d,%d,%d facing %d moved %d blocks",
-                (int) $pistonPos->x,
-                (int) $pistonPos->y,
-                (int) $pistonPos->z,
-                $facing,
-                count($chain)
+                "[Piston] Extend @ %d,%d,%d facing=%s moved=%d baseExtended=true head=%s",
+                $pistonPos->getFloorX(),
+                $pistonPos->getFloorY(),
+                $pistonPos->getFloorZ(),
+                PistonBlock::facingName($facing),
+                count($chain),
+                $visualBlock->getName()
             ));
         }
     }
 
-    public function executeRetract(World $world, Position $pistonPos, int $facing, bool $sticky): void {
-        if (!$sticky) {
+    public function executeRetract(World $world, Position $pistonPos, PistonBlock $piston): void {
+        if (!$piston->isExtended()) {
             return;
         }
 
+        $facing = $piston->getFacing();
         [$dx, $dy, $dz] = Facing::OFFSET[$facing];
-        $pullX = (int) $pistonPos->x + ($dx * 2);
-        $pullY = (int) $pistonPos->y + ($dy * 2);
-        $pullZ = (int) $pistonPos->z + ($dz * 2);
+        $headPos = $pistonPos->getSide($facing);
+        $world->setBlock($headPos, VanillaBlocks::AIR());
 
-        if (!$world->isChunkLoaded($pullX >> 4, $pullZ >> 4)) {
-            return;
+        $world->setBlock($pistonPos, (clone $piston)->setExtended(false));
+
+        $this->engine->notifyChange($headPos);
+        $this->engine->notifyChange($pistonPos);
+
+        if ($piston->isSticky()) {
+            $pullPos = new Position(
+                $pistonPos->getFloorX() + ($dx * 2),
+                $pistonPos->getFloorY() + ($dy * 2),
+                $pistonPos->getFloorZ() + ($dz * 2),
+                $world
+            );
+
+            if (
+                $world->isInWorld($pullPos->getFloorX(), $pullPos->getFloorY(), $pullPos->getFloorZ()) &&
+                $world->isChunkLoaded($pullPos->getFloorX() >> 4, $pullPos->getFloorZ() >> 4)
+            ) {
+                $target = $world->getBlock($pullPos);
+                if (
+                    $target->getTypeId() !== VanillaBlocks::AIR()->getTypeId() &&
+                    BlockUtil::isMovable($target)
+                ) {
+                    $world->setBlock($headPos, $target);
+                    $world->setBlock($pullPos, VanillaBlocks::AIR());
+                    $this->engine->notifyChange($headPos);
+                    $this->engine->notifyChange($pullPos);
+                }
+            }
         }
-
-        $target = $world->getBlockAt($pullX, $pullY, $pullZ);
-
-        if ($target->getTypeId() === VanillaBlocks::AIR()->getTypeId()) {
-            return;
-        }
-
-        if (!BlockUtil::isMovable($target)) {
-            return;
-        }
-
-        $destX = (int) $pistonPos->x + $dx;
-        $destY = (int) $pistonPos->y + $dy;
-        $destZ = (int) $pistonPos->z + $dz;
-        $dest  = new Position($destX, $destY, $destZ, $world);
-
-        $world->setBlock($dest, $target);
-        $world->setBlock(new Position($pullX, $pullY, $pullZ, $world), VanillaBlocks::AIR());
-
-        $this->engine->notifyChange($dest);
-        $this->engine->notifyChange(new Position($pullX, $pullY, $pullZ, $world));
 
         if ($this->cfg->isDebugPiston()) {
             $this->engine->getPlugin()->getLogger()->debug(sprintf(
-                "[Piston] Retract @ %d,%d,%d pulled block from %d,%d,%d",
-                (int) $pistonPos->x, (int) $pistonPos->y, (int) $pistonPos->z,
-                $pullX, $pullY, $pullZ
+                "[Piston] Retract @ %d,%d,%d facing=%s sticky=%s baseExtended=false",
+                $pistonPos->getFloorX(),
+                $pistonPos->getFloorY(),
+                $pistonPos->getFloorZ(),
+                PistonBlock::facingName($facing),
+                $piston->isSticky() ? "true" : "false"
             ));
         }
+    }
+
+    private function reconcilePiston(Position $pos, Block $block, ?bool $powered = null): void {
+        $world = $pos->getWorld();
+        if (
+            !$world->isInWorld($pos->getFloorX(), $pos->getFloorY(), $pos->getFloorZ()) ||
+            !$world->isChunkLoaded($pos->getFloorX() >> 4, $pos->getFloorZ() >> 4) ||
+            !$block instanceof PistonBlock
+        ) {
+            return;
+        }
+
+        $powered ??= SignalPropagator::calculatePowerAt(
+            $this->engine,
+            $world,
+            $block,
+            $pos->getFloorX(),
+            $pos->getFloorY(),
+            $pos->getFloorZ()
+        ) > 0;
+
+        if ($powered) {
+            if ($block->isExtended()) {
+                $this->ensureHeadState($world, $pos, $block, true);
+                return;
+            }
+
+            $this->ensureHeadState($world, $pos, $block, false);
+            $this->executePush($world, $pos, $block);
+            return;
+        }
+
+        if ($block->isExtended()) {
+            $this->executeRetract($world, $pos, $block);
+            return;
+        }
+
+        $this->ensureHeadState($world, $pos, $block, false);
+    }
+
+    private function ensureHeadState(World $world, Position $pistonPos, PistonBlock $piston, bool $shouldExist): void {
+        $headPos = $pistonPos->getSide($piston->getFacing());
+        $front = $world->getBlock($headPos);
+        $hasMatchingHead = (
+            ($piston->isSticky() && $front instanceof StickyPistonHeadBlock) ||
+            (!$piston->isSticky() && $front instanceof PistonHeadBlock && !$front instanceof StickyPistonHeadBlock)
+        ) && BlockUtil::getPistonFacing($front) === $piston->getFacing();
+
+        if ($shouldExist) {
+            if (!$hasMatchingHead) {
+                $this->placeHeadVisual($world, $headPos, $piston->isSticky(), $piston->getFacing());
+                $this->engine->notifyChange($headPos);
+            }
+            return;
+        }
+
+        if ($hasMatchingHead) {
+            $world->setBlock($headPos, VanillaBlocks::AIR());
+            $this->engine->notifyChange($headPos);
+        }
+    }
+
+    private function createHeadBlock(bool $sticky, int $facing): Block {
+        $head = $sticky ? PistonBlockRegistry::stickyPistonHead() : PistonBlockRegistry::pistonHead();
+        return $head->setFacing($facing);
+    }
+
+    private function placeHeadVisual(World $world, Position $headPos, bool $sticky, int $facing): Block {
+        $head = $this->createHeadBlock($sticky, $facing);
+        $world->setBlock($headPos, $head);
+
+        $placed = $world->getBlock($headPos);
+        $validHead = BlockUtil::isPistonHead($placed) && BlockUtil::getPistonFacing($placed) === $facing;
+        if ($validHead) {
+            return $placed;
+        }
+
+        $fallback = PistonBlockRegistry::movingBlock();
+        $world->setBlock($headPos, $fallback);
+
+        if ($this->cfg->isDebugPiston()) {
+            $this->engine->getPlugin()->getLogger()->warning(sprintf(
+                "[Piston] Head fallback @ %d,%d,%d facing=%s placed=%s fallback=%s",
+                $headPos->getFloorX(),
+                $headPos->getFloorY(),
+                $headPos->getFloorZ(),
+                PistonBlock::facingName($facing),
+                $placed->getName(),
+                $fallback->getName()
+            ));
+        }
+
+        return $fallback;
     }
 }
